@@ -17,9 +17,8 @@ langchain-community>=0.2
 langchain-qdrant>=0.1
 langchain-core>=0.2
 tiktoken==0.5.2
-transformers==4.37.2
 
-# RAG & Vector Database (Arkadiusz's module)
+# RAG & Vector Database
 qdrant-client>=1.7
 pypdf>=4.0.0
 
@@ -39,16 +38,7 @@ textblob==0.17.1
 
 # NLP & Text Processing
 nltk==3.8.1
-spacy==3.7.2
 scikit-learn==1.4.0
-
-# Testing & Development
-pytest==8.0.0
-pytest-cov==4.1.0
-black==24.1.1
-flake8==7.0.0
-ipykernel==6.29.0
-jupyter==1.0.0
 
 # Utilities
 tqdm==4.66.1
