@@ -27,6 +27,7 @@ from src.agents.topic_agent import TopicEvolutionAgent
 from src.agents.confidence_agent import ManagementConfidenceAgent
 from src.agents.analyst_agent import AnalystConcernAgent
 from src.agents.orchestrator import RiskSynthesizer
+from src.agents.rag_module import ArkadiuszRAGSystem, init_rag_system, get_rag_system
 from src.models.model_evaluator import ModelEvaluator
 from src.utils.source_tracker import source_tracker, DocumentReference, SourceQuote
 from src.utils.document_viewer import document_viewer
@@ -97,6 +98,22 @@ if 'analysis_status' not in st.session_state:
     st.session_state.analysis_status = "Ready"
 if 'analysis_step' not in st.session_state:
     st.session_state.analysis_step = 0
+
+# RAG System session state (Arkadiusz's module)
+if 'rag_system' not in st.session_state:
+    st.session_state.rag_system = None
+if 'rag_query_history' not in st.session_state:
+    st.session_state.rag_query_history = []
+if 'rag_indexed_docs' not in st.session_state:
+    st.session_state.rag_indexed_docs = []
+if 'rag_collection_stats' not in st.session_state:
+    st.session_state.rag_collection_stats = {}
+if 'rag_indexed_info' not in st.session_state:
+    st.session_state.rag_indexed_info = None
+if 'rag_chunk_count' not in st.session_state:
+    st.session_state.rag_chunk_count = None
+if 'rag_index_synchronized' not in st.session_state:
+    st.session_state.rag_index_synchronized = None  # None = unknown, True = synced, False = unsynced
 
 def trigger_analysis():
     '''Callback function for Run Analysis button'''
@@ -674,6 +691,9 @@ with st.sidebar:
         disabled=config_disabled
     )
     
+    # Store selected files in session state for other tabs to access
+    st.session_state.selected_files = selected_files
+    
     # Show selection count based on actual selection
     if selected_files:
         selected_count = len(selected_files)
@@ -866,11 +886,12 @@ tab_names = [
     "🎯 Topic Evolution", 
     "🤖 Model Comparison",
     "💬 Chat Assistant",
-    "📚 Document Sources"
+    "📚 Document Sources",
+    "🔍 RAG Analysis"  # Arkadiusz's RAG module
 ]
 
 # Create tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(tab_names)
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tab_names)
 
 with tab1:
     st.header("Risk Assessment Dashboard")
@@ -1374,6 +1395,339 @@ with tab6:
                         st.write("**Tracked in analysis:** ✅")
     else:
         st.info("No documents analyzed yet. Run analysis in the Risk Dashboard tab.")
+
+# Tab 7: RAG Analysis (Arkadiusz's Module)
+with tab7:
+    st.header("🔍 RAG Analysis System")
+    st.markdown("*Document Analysis using Retrieval Augmented Generation*")
+    log_debug("[RAG-UI] RAG tab loaded")
+    
+    # Initialize RAG system with the selected model from Configuration
+    if 'rag_system' not in st.session_state or st.session_state.rag_system is None:
+        try:
+            log_info(f"[RAG-UI] Attempting to initialize RAG system with model: {selected_model}")
+            rag_system = init_rag_system(chat_model=selected_model)
+            log_info(f"[RAG-UI] RAG system initialized successfully with model: {selected_model}")
+        except Exception as e:
+            log_error(f"[RAG-UI] Failed to initialize RAG system: {str(e)}")
+            st.error(f"❌ Failed to initialize RAG system: {str(e)}")
+            rag_system = None
+            import traceback
+            log_error(f"[RAG-UI] Traceback: {traceback.format_exc()}")
+    else:
+        # Check if model has changed and reinitialize if needed
+        rag_system = init_rag_system(chat_model=selected_model)
+    
+    # Check synchronization status on first load
+    if rag_system and st.session_state.rag_index_synchronized is None:
+        try:
+            stats = rag_system.get_collection_stats()
+            chunk_count = stats.get('points_count', 0) if stats.get('exists', False) else 0
+            
+            # If there are chunks in Qdrant but no indexed info in session, we're unsynchronized
+            if chunk_count > 0 and not st.session_state.rag_indexed_info:
+                st.session_state.rag_index_synchronized = False
+                log_info(f"[RAG-UI] Detected unsynchronized index with {chunk_count} existing chunks")
+            elif chunk_count == 0:
+                st.session_state.rag_index_synchronized = True  # Empty is synchronized
+            else:
+                st.session_state.rag_index_synchronized = True  # Has info, assume synced
+        except Exception as e:
+            log_error(f"[RAG-UI] Failed to check synchronization: {str(e)}")
+            st.session_state.rag_index_synchronized = None
+    
+    # Create two columns for layout
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # Query Section
+        st.subheader("📝 Query Documents")
+        
+        # Query input
+        query_input = st.text_area(
+            "Enter your question about the documents:",
+            height=100,
+            placeholder="Example: What are the main risks mentioned in the documents?"
+        )
+        
+        # Query button and options
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
+        with col_btn1:
+            query_button = st.button("🔍 Search", type="primary", use_container_width=True)
+        with col_btn2:
+            clear_history = st.button("🗑️ Clear History", use_container_width=True)
+        
+        # Advanced options
+        with st.expander("⚙️ Advanced Options"):
+            search_mode = st.selectbox("Search Mode:", ["mmr", "similarity"], index=0)
+            num_chunks = st.slider("Number of chunks to retrieve:", 1, 10, 6)
+            num_sources = st.slider("Number of sources to show:", 1, 10, 4)
+        
+        # Process query
+        if query_button and query_input:
+            if not rag_system:
+                st.error("❌ RAG system not initialized. Please check your configuration.")
+            else:
+                with st.spinner("🔍 Searching documents..."):
+                    try:
+                        log_info(f"[RAG-UI] Processing query: {query_input}")
+                        answer, sources = rag_system.rag_answer(
+                            query_input,
+                            mode=search_mode,
+                            k=num_chunks,
+                            topk_sources=num_sources
+                        )
+                        
+                        # Add to history
+                        st.session_state.rag_query_history.append({
+                            "question": query_input,
+                            "answer": answer,
+                            "sources": sources,
+                            "timestamp": datetime.now()
+                        })
+                        
+                        # Display answer
+                        st.success("✅ Answer generated successfully!")
+                        st.markdown("### Answer:")
+                        st.markdown(answer)
+                        
+                        # Display sources
+                        if sources:
+                            st.markdown("### 📚 Sources:")
+                            for source in sources:
+                                st.markdown(f"- {source}")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                        log_error(f"[RAG-UI] Query failed: {str(e)}")
+        
+        # Clear history
+        if clear_history:
+            st.session_state.rag_query_history = []
+            st.success("History cleared!")
+        
+        # Display history
+        if st.session_state.rag_query_history:
+            st.divider()
+            st.subheader("📜 Query History")
+            for i, item in enumerate(reversed(st.session_state.rag_query_history[-5:])):
+                with st.expander(f"Q: {item['question'][:100]}... ({item['timestamp'].strftime('%H:%M:%S')})"):
+                    st.markdown("**Question:**")
+                    st.write(item['question'])
+                    st.markdown("**Answer:**")
+                    st.write(item['answer'])
+                    if item['sources']:
+                        st.markdown("**Sources:**")
+                        for source in item['sources']:
+                            st.write(f"- {source}")
+    
+    with col2:
+        # Status and Management Section
+        st.subheader("🎛️ System Status")
+        
+        # Connection status
+        if rag_system:
+            try:
+                connection_status = rag_system.test_connection()
+                log_debug(f"[RAG-UI] Connection test result: {connection_status}")
+            except Exception as e:
+                connection_status = False
+                log_error(f"[RAG-UI] Connection test failed: {str(e)}")
+        else:
+            connection_status = False
+            log_warning("[RAG-UI] RAG system is None, cannot test connection")
+            
+        if connection_status:
+            st.success("✅ Qdrant Connected")
+            # Display the model being used for RAG
+            if rag_system and hasattr(rag_system, 'CHAT_MODEL'):
+                st.info(f"🤖 Using model: **{rag_system.CHAT_MODEL}**")
+        else:
+            st.error("❌ Qdrant Disconnected")
+            st.info("Please check your Qdrant configuration in .env or Streamlit secrets")
+        
+        st.divider()
+        
+        # Document Management
+        st.subheader("📁 Document Management")
+        
+        # Single index button that always re-indexes
+        if st.button("🔄 Index Selected Documents", type="primary", use_container_width=True):
+            if not rag_system:
+                st.error("❌ RAG system not initialized")
+            elif 'selected_files' not in st.session_state or not st.session_state.selected_files:
+                st.warning("⚠️ No documents selected in Configuration")
+            else:
+                with st.spinner(f"Indexing {len(st.session_state.selected_files)} selected documents..."):
+                    try:
+                        # Use the same data path as main app
+                        data_dir = Path(config.DATA_PATH)
+                        
+                        # Update RAG module to use main app's data directory
+                        rag_system.DATA_DIR = data_dir
+                        
+                        # Always re-index to ensure fresh embeddings
+                        result = rag_system.populate_vector_store(selected_files=st.session_state.selected_files)
+                        
+                        if result.get("success", False):
+                            # Count actual documents, not pages
+                            num_docs = len([f for f in st.session_state.selected_files if f.endswith('.pdf')])
+                            num_pages = result.get('documents_processed', 0)  # This is actually pages
+                            chunks_created = result.get('chunks_created', 0)
+                            st.success(f"✅ Indexed {chunks_created} chunks from {num_docs} document{'s' if num_docs != 1 else ''} ({num_pages} pages processed)")
+                            
+                            # Track indexed documents with detailed info
+                            import datetime
+                            indexed_info = {
+                                'documents': [f for f in st.session_state.selected_files if f.endswith('.pdf')],
+                                'total_chunks': chunks_created,
+                                'total_pages': num_pages,
+                                'indexed_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'chunks_per_doc': {}  # Could be populated with per-doc info if needed
+                            }
+                            st.session_state.rag_indexed_info = indexed_info
+                            st.session_state.rag_indexed_docs = [Path(f) for f in indexed_info['documents']]
+                            # Store the new chunk count for immediate display
+                            st.session_state.rag_chunk_count = chunks_created
+                            # Mark as synchronized after successful indexing
+                            st.session_state.rag_index_synchronized = True
+                            # Force refresh to update chunk count display
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Indexing failed: {result.get('error', 'Unknown error')}")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                        log_error(f"[RAG-UI] Indexing failed: {str(e)}")
+        
+        # Clear Vector Store button
+        if st.button("🗑️ Clear Vector Store", use_container_width=True):
+            if not rag_system:
+                st.error("❌ RAG system not initialized")
+            else:
+                # Confirmation using session state
+                if 'confirm_clear' not in st.session_state:
+                    st.session_state.confirm_clear = False
+                
+                if not st.session_state.confirm_clear:
+                    st.warning("⚠️ This will delete ALL indexed documents from the vector store. Click again to confirm.")
+                    st.session_state.confirm_clear = True
+                else:
+                    with st.spinner("Clearing vector store..."):
+                        try:
+                            # Clear the vector store by recreating the collection
+                            client = rag_system.get_qdrant_client()
+                            
+                            # Get embedding dimensions for recreation
+                            if rag_system.EMBEDDING_MODEL == "text-embedding-3-large":
+                                dim = 3072
+                            elif rag_system.EMBEDDING_MODEL == "text-embedding-3-small":
+                                dim = 1536
+                            else:
+                                dim = 1536  # Default
+                            
+                            # Recreate the collection (this deletes all data)
+                            from qdrant_client import models as rest
+                            client.recreate_collection(
+                                collection_name=rag_system.COLLECTION_NAME,
+                                vectors_config=rest.VectorParams(size=dim, distance=rest.Distance.COSINE)
+                            )
+                            
+                            # Clear session state
+                            st.session_state.rag_indexed_docs = []
+                            st.session_state.rag_chunk_count = 0
+                            st.session_state.rag_indexed_info = None
+                            st.session_state.rag_index_synchronized = True  # Empty is synchronized
+                            st.session_state.confirm_clear = False
+                            
+                            st.success("✅ Vector store cleared successfully")
+                            log_info("[RAG-UI] Vector store cleared")
+                            
+                            # Force refresh
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ Failed to clear vector store: {str(e)}")
+                            log_error(f"[RAG-UI] Failed to clear vector store: {str(e)}")
+                            st.session_state.confirm_clear = False
+        
+        # Reset confirmation if user does other actions
+        if 'confirm_clear' in st.session_state and st.session_state.confirm_clear:
+            # Auto-reset confirmation after showing warning
+            if st.button("Cancel", use_container_width=True):
+                st.session_state.confirm_clear = False
+                st.rerun()
+        
+        # Index Information Display
+        st.divider()
+        st.subheader("📊 Index Status")
+        
+        # Check if we're synchronized
+        if st.session_state.rag_index_synchronized == False:
+            # Unsynchronized state - show data from Qdrant with warning
+            if rag_system:
+                stats = rag_system.get_collection_stats()
+                chunk_count = stats.get('points_count', 0) if stats.get('exists', False) else 0
+                if chunk_count > 0:
+                    st.warning(f"⚠️ Index contains {chunk_count:,} chunks from a previous session")
+                    st.info("📝 The indexed documents are unknown. Please re-index selected documents to sync or clear the vector store.")
+                else:
+                    st.info("📭 Index is empty. Select documents and click 'Index Selected Documents' to begin.")
+        elif 'rag_indexed_info' in st.session_state and st.session_state.rag_indexed_info:
+            # Synchronized with data
+            info = st.session_state.rag_indexed_info
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Documents in Index", len(info['documents']))
+                st.metric("Total Chunks", info['total_chunks'])
+            with col2:
+                st.metric("Total Pages", info['total_pages'])
+                st.metric("Last Indexed", info['indexed_at'])
+        else:
+            # Check Qdrant for actual state
+            if rag_system:
+                stats = rag_system.get_collection_stats()
+                chunk_count = stats.get('points_count', 0) if stats.get('exists', False) else 0
+                if chunk_count > 0:
+                    st.warning(f"⚠️ Index contains {chunk_count:,} chunks but document info is unavailable")
+                    st.info("📝 Re-index selected documents to sync the index status.")
+                else:
+                    st.info("📭 Index is empty. Select documents and click 'Index Selected Documents' to begin.")
+        
+        # List selected documents for RAG indexing
+        if 'selected_files' in st.session_state and st.session_state.selected_files:
+            st.divider()
+            st.subheader("📚 Selected Documents Status")
+            selected_count = len(st.session_state.selected_files)
+            
+            # Get list of indexed documents
+            indexed_docs = []
+            if 'rag_indexed_info' in st.session_state and st.session_state.rag_indexed_info:
+                indexed_docs = st.session_state.rag_indexed_info.get('documents', [])
+            
+            # Convert to Path objects for comparison
+            indexed_paths = [Path(doc).name for doc in indexed_docs]
+            
+            st.info(f"📌 {selected_count} document(s) selected in Configuration")
+            
+            for file_path in st.session_state.selected_files:
+                file_path_obj = Path(file_path)
+                
+                # Check synchronization state
+                if st.session_state.rag_index_synchronized == False:
+                    # Unsynchronized - we don't know what's in the index
+                    indexed_marker = "❓"
+                    status_text = "Unknown - re-index to sync"
+                else:
+                    # Synchronized - check if file is in the index
+                    is_indexed = file_path in indexed_docs or str(file_path) in indexed_docs
+                    indexed_marker = "✅" if is_indexed else "⏳"
+                    status_text = "In Index" if is_indexed else "Not in Index"
+                    
+                st.write(f"{indexed_marker} {file_path_obj.name} ({status_text})")
+        else:
+            st.divider()
+            st.info("📋 No documents selected. Please select documents in the Configuration section.")
 
 # Footer - Model Status
 st.divider()
