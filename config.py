@@ -13,6 +13,20 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 
+# Qdrant Configuration (for Arkadiusz's RAG module)
+QDRANT_URL = os.getenv('QDRANT_URL', 'http://localhost:6333')
+QDRANT_API_KEY = os.getenv('QDRANT_API_KEY')  # For Qdrant Cloud
+QDRANT_COLLECTION_NAME = os.getenv('QDRANT_COLLECTION_NAME', 'my_rag_collection')
+
+# RAG Configuration (Arkadiusz's settings)
+RAG_CHUNK_SIZE = int(os.getenv('RAG_CHUNK_SIZE', 800))
+RAG_CHUNK_OVERLAP = int(os.getenv('RAG_CHUNK_OVERLAP', 100))
+RAG_SEPARATORS = ["\n\n", "\n", " ", ""]
+RAG_EMBEDDING_MODEL = os.getenv('RAG_EMBEDDING_MODEL', 'text-embedding-3-large')
+RAG_CHAT_MODEL = os.getenv('RAG_CHAT_MODEL', 'gpt-4o-mini')
+RAG_WRITE_BATCH_SIZE = int(os.getenv('RAG_WRITE_BATCH_SIZE', 256))
+RAG_DATA_DIR = os.getenv('RAG_DATA_DIR', './data')
+
 # Model Configuration
 DEFAULT_MODEL = os.getenv('DEFAULT_MODEL', 'gpt-5-mini')
 MAX_TOKENS = int(os.getenv('MAX_TOKENS', 35000))
