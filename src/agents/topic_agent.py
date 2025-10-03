@@ -11,9 +11,9 @@ import config
 
 class TopicEvolutionAgent(BaseAgent):
     """Agent for tracking topic evolution and identifying emerging risks"""
-    
+
     def __init__(self, model: str = None):
-        super().__init__('topic_evolution', model)
+        super().__init__('topic_analyzer', model)
         self.previous_topics = set()
         self.topic_history = []
         self.risk_topic_patterns = self._compile_risk_patterns()
