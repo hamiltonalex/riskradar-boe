@@ -50,29 +50,58 @@ class TranscriptLoader:
         }
     
     def load_pdf_transcript(self, pdf_path: str) -> str:
-        """Extract text from PDF transcript"""
-        text = ""
-        
+        """Extract text from PDF transcript with memory optimization for Streamlit Cloud"""
+        text_parts = []
+
         try:
-            # Try pdfplumber first (better for complex PDFs)
-            with pdfplumber.open(pdf_path) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-        except:
-            # Fallback to PyPDF2
+            # Use PyPDF2 (more memory efficient than pdfplumber)
+            import gc
+            with open(pdf_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                num_pages = len(pdf_reader.pages)
+                log_info(f"Processing PDF with {num_pages} pages")
+
+                # Process pages one at a time to minimize memory usage
+                for page_num in range(num_pages):
+                    try:
+                        page = pdf_reader.pages[page_num]
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+
+                        # Force garbage collection every 5 pages
+                        if page_num % 5 == 0:
+                            gc.collect()
+
+                    except Exception as e:
+                        log_warning(f"Error reading page {page_num}: {e}")
+                        continue
+
+        except Exception as e:
+            log_error(f"Error reading PDF {pdf_path}: {e}")
+            # Try minimal fallback - just get what we can
             try:
+                import gc
                 with open(pdf_path, 'rb') as file:
                     pdf_reader = PyPDF2.PdfReader(file)
-                    for page_num in range(len(pdf_reader.pages)):
-                        page = pdf_reader.pages[page_num]
-                        text += page.extract_text() + "\n"
-            except Exception as e:
-                log_error(f"Error reading PDF {pdf_path}: {e}")
-                return ""
-        
-        return text
+                    # Just try first few pages if full PDF fails
+                    for i in range(min(5, len(pdf_reader.pages))):
+                        try:
+                            text_parts.append(pdf_reader.pages[i].extract_text())
+                        except:
+                            pass
+                    gc.collect()
+            except:
+                return "Error: Could not read PDF file. File may be too large or corrupted."
+
+        # Join text parts efficiently
+        result = "\n".join(text_parts)
+
+        # Final cleanup
+        import gc
+        gc.collect()
+
+        return result if result else "Error: No text could be extracted from PDF"
     
     def load_text_transcript(self, text_path: str) -> str:
         """Load text transcript from file"""
