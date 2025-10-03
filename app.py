@@ -2066,9 +2066,11 @@ with tab7:
                             else:
                                 dim = 1536  # Default
                             
-                            # Recreate the collection (this deletes all data)
+                            # Delete and recreate the collection (this deletes all data)
                             from qdrant_client import models as rest
-                            client.recreate_collection(
+                            if client.collection_exists(collection_name=rag_system.COLLECTION_NAME):
+                                client.delete_collection(collection_name=rag_system.COLLECTION_NAME)
+                            client.create_collection(
                                 collection_name=rag_system.COLLECTION_NAME,
                                 vectors_config=rest.VectorParams(size=dim, distance=rest.Distance.COSINE)
                             )
