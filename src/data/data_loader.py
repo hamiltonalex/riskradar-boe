@@ -50,7 +50,7 @@ class TranscriptLoader:
         }
     
     def load_pdf_transcript(self, pdf_path: str) -> str:
-        """Extract text from PDF transcript with memory optimization for Streamlit Cloud"""
+        """Extract text from PDF transcript with memory optimization and encryption support"""
         text_parts = []
 
         try:
@@ -58,6 +58,18 @@ class TranscriptLoader:
             import gc
             with open(pdf_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
+
+                # Check if PDF is encrypted
+                if pdf_reader.is_encrypted:
+                    try:
+                        # Try to decrypt with empty password (common for protected PDFs)
+                        pdf_reader.decrypt('')
+                        log_info(f"Successfully decrypted PDF {pdf_path}")
+                    except:
+                        log_warning(f"PDF {pdf_path} is encrypted and requires a password")
+                        # Still try to read what we can
+                        pass
+
                 num_pages = len(pdf_reader.pages)
                 log_info(f"Processing PDF with {num_pages} pages")
 
@@ -74,10 +86,18 @@ class TranscriptLoader:
                             gc.collect()
 
                     except Exception as e:
-                        log_warning(f"Error reading page {page_num}: {e}")
+                        if "PyCryptodome" in str(e):
+                            log_error(f"PyCryptodome required for encrypted PDF. Install with: pip install PyCryptodome")
+                            return "Error: This PDF is encrypted. PyCryptodome package is required but not installed."
+                        else:
+                            log_warning(f"Error reading page {page_num}: {e}")
                         continue
 
         except Exception as e:
+            if "PyCryptodome" in str(e):
+                log_error(f"Cannot read encrypted PDF without PyCryptodome: {e}")
+                return "Error: This PDF requires PyCryptodome for decryption. Please ensure it's installed."
+
             log_error(f"Error reading PDF {pdf_path}: {e}")
             # Try minimal fallback - just get what we can
             try:
@@ -92,7 +112,7 @@ class TranscriptLoader:
                             pass
                     gc.collect()
             except:
-                return "Error: Could not read PDF file. File may be too large or corrupted."
+                return "Error: Could not read PDF file. File may be too large, corrupted, or require additional dependencies."
 
         # Join text parts efficiently
         result = "\n".join(text_parts)
