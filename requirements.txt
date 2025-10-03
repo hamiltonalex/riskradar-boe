@@ -7,7 +7,7 @@ python-dotenv==1.0.0
 # LLM & AI - Fixed version conflicts
 openai==1.104.2
 anthropic==0.64.0
-google-generativeai==0.3.2
+google-generativeai==0.7.0
 protobuf>=3.20,<5
 langchain==0.3.0
 langchain-openai==0.2.0
