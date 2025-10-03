@@ -1573,10 +1573,20 @@ with tab1:
                         st.session_state.source_tracker.add_document(str(file_path_obj), "transcript")
                         
                 elif file_path_obj.suffix == '.pdf':
+                    # Check file size before loading (Streamlit Cloud has memory limits)
+                    file_size_mb = file_path_obj.stat().st_size / (1024 * 1024)
+                    if file_size_mb > 10:  # Limit to 10MB for PDFs
+                        load_errors.append((file_path, f"PDF too large ({file_size_mb:.1f}MB). Maximum 10MB supported."))
+                        continue
+
                     content = agents['loader'].load_pdf_transcript(str(file_path_obj))
+                    if content.startswith("Error:"):
+                        load_errors.append((file_path, content))
+                        continue
+
                     all_text += content + "\n\n"
                     successful_loads.append(str(file_path_obj))
-                    
+
                     # Track document - add_document expects file_path string, not DocumentReference object
                     st.session_state.source_tracker.add_document(str(file_path_obj), "report")
                     
