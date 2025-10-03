@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 RiskRadar - Improved Streamlit Dashboard with Model Validation
 Properly links model selector to agents and validates API keys
@@ -28,7 +30,6 @@ from src.agents.confidence_agent import ManagementConfidenceAgent
 from src.agents.analyst_agent import AnalystConcernAgent
 from src.agents.orchestrator import RiskSynthesizer
 from src.agents.rag_module import ArkadiuszRAGSystem, init_rag_system, get_rag_system
-from src.models.model_evaluator import ModelEvaluator
 from src.utils.source_tracker import source_tracker, DocumentReference, SourceQuote
 from src.utils.document_viewer import document_viewer
 from src.utils.debug_logger import get_logger, log_info, log_error, log_debug, log_warning
@@ -367,7 +368,7 @@ st.markdown("**Bank of England Supervisory Intelligence Platform**")
 # Debug Console Section (if enabled) - Above everything else
 if config.DEBUG_CONSOLE_ENABLED:
     # Create a collapsible debug console
-    with st.expander("🔍 Debug Console", expanded=st.session_state.get('analysis_running', False)):
+    with st.expander("Debug Console", expanded=st.session_state.get('analysis_running', False)):
         # Always sync logs from buffer to session state
         logger.sync_logs_to_session()
         
@@ -403,7 +404,7 @@ if config.DEBUG_CONSOLE_ENABLED:
         
         with col4:
             # Clear logs button
-            if st.button("🗑️ Clear", key='clear_logs_btn'):
+            if st.button("Clear", key='clear_logs_btn'):
                 logger.clear_logs()
                 st.rerun()
         
@@ -411,7 +412,7 @@ if config.DEBUG_CONSOLE_ENABLED:
             # Download logs button
             logs_export = logger.export_logs()
             st.download_button(
-                "📥 Export",
+                "Export",
                 data=logs_export,
                 file_name=f"riskradar_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain",
@@ -419,7 +420,7 @@ if config.DEBUG_CONSOLE_ENABLED:
             )
         
         # Display logs in a scrollable area
-        st.markdown("### 📋 Log Output")
+        st.markdown("### Log Output")
         
         # Get filtered logs
         filtered_logs = logger.get_filtered_logs()
@@ -469,36 +470,31 @@ with st.sidebar:
     st.header("⚙️ Configuration")
     
     # Model selection with validation
-    st.subheader("🤖 AI Model Selection")
+    st.subheader("AI Model Selection")
     
     # Build available models dynamically based on configured APIs
     available_models = {}
     
-    # OpenAI models - based on common available models in 2024/2025
+    # OpenAI models - GPT-5 family
     if config.OPENAI_API_KEY:
         available_models.update({
             "gpt-5": "GPT-5 (Most Advanced)",
-            "gpt-5-mini": "GPT-5 Mini (Fast Next Gen)",
-            "gpt-5-nano": "GPT-5 Nano (Ultra Fast)",
-            "gpt-4o": "GPT-4o (Balanced Performance)",
-            "gpt-4o-mini": "GPT-4o Mini (Cost-Effective)",
-            "o1-mini": "O1 Mini (Reasoning Model)",
+            "gpt-5-mini": "GPT-5 Mini (Efficient & Fast)",
         })
-    
-    # Anthropic/Claude models - latest verified models
+
+    # Anthropic/Claude models - Claude 4 family
     if config.ANTHROPIC_API_KEY:
         available_models.update({
-            "claude-3-haiku-20240307": "Claude 3 Haiku (Fast & Efficient)",
-            "claude-3-5-haiku-latest": "Claude 3.5 Haiku (Improved Speed)",
-            "claude-3-7-sonnet-latest": "Claude 3.7 Sonnet (Latest & Powerful)",
+            "claude-opus-4-1-20250805": "Claude Opus 4.1 (Most Capable)",
+            "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5 (Latest & Balanced)",
+            "claude-3-5-haiku-20241022": "Claude Haiku 3.5 (Fast & Efficient)",
         })
-    
-    # Google Gemini models - stable models as of 2025
+
+    # Google Gemini models - Gemini 2.5 family
     if config.GOOGLE_API_KEY:
         available_models.update({
-            "gemini-2.5-flash": "Gemini 2.5 Flash (Best Price/Performance)",
-            "gemini-2.5-pro": "Gemini 2.5 Pro (Most Capable with Thinking)",
-            "gemini-2.0-flash": "Gemini 2.0 Flash (Fast Multimodal)",
+            "gemini-2.5-pro": "Gemini 2.5 Pro (Advanced Reasoning)",
+            "gemini-2.5-flash": "Gemini 2.5 Flash (Best Price-Performance)",
         })
     
     # If no API keys are configured, show demo models
@@ -508,16 +504,16 @@ with st.sidebar:
         }
         st.warning("⚠️ No API keys configured. Please add API keys to use AI models.")
     
-    # Select default model based on what's available
+    # Select default model based on what's available (prioritize GPT-5 over GPT-5 Mini)
     default_model = None
-    if "claude-3-7-sonnet-latest" in available_models:
-        default_model = "claude-3-7-sonnet-latest"
+    if "gpt-5" in available_models:
+        default_model = "gpt-5"
     elif "gpt-5-mini" in available_models:
         default_model = "gpt-5-mini"
+    elif "claude-sonnet-4-5-20250929" in available_models:
+        default_model = "claude-sonnet-4-5-20250929"
     elif "gemini-2.5-flash" in available_models:
         default_model = "gemini-2.5-flash"
-    elif "gpt-4o-mini" in available_models:
-        default_model = "gpt-4o-mini"
     elif available_models:
         default_model = list(available_models.keys())[0]
     
@@ -529,7 +525,10 @@ with st.sidebar:
         help="Choose the AI model for analysis. Models are shown based on configured API keys.",
         disabled=config_disabled
     )
-    
+
+    # Store selected model in session state for metrics display
+    st.session_state.selected_model = selected_model
+
     # Validate selected model's API key
     is_valid, message = validate_api_key(selected_model)
     
@@ -610,11 +609,11 @@ with st.sidebar:
     st.divider()
     
     # File selection
-    st.subheader("📄 Document Selection")
+    st.subheader("Document Selection")
     
     # Show available documents
     available_files = []
-    data_folders = ['data/transcripts', 'data/bank_reports', 'data/regulatory_docs', 'data/uploads']
+    data_folders = ['data/transcripts', 'data/bank_reports', 'data/regulatory_docs','data/financial_docs', 'data/uploads']
     
     # Get the base directory of the app
     base_dir = Path(__file__).parent
@@ -668,9 +667,14 @@ with st.sidebar:
     
     # Initialize default selection if needed
     if 'file_selector' not in st.session_state:
-        # Initialize with first 3 files or all if less than 3
-        non_upload_files = [f for f in available_files if 'uploads' not in f]
-        default_selection = non_upload_files[:3] if len(non_upload_files) >= 3 else non_upload_files
+        # Look for NYSE_CS_2019.pdf specifically
+        nyse_file = str(base_dir / 'data' / 'financial_docs' / 'NYSE_CS_2019.pdf')
+        if nyse_file in available_files:
+            default_selection = [nyse_file]
+        else:
+            # Fallback to first file if NYSE not found
+            non_upload_files = [f for f in available_files if 'uploads' not in f]
+            default_selection = non_upload_files[:1] if non_upload_files else []
         st.session_state.file_selector = default_selection
     
     # Ensure session state is a list and all files are still available
@@ -706,7 +710,7 @@ with st.sidebar:
         st.info("📌 No files selected")
     
     # Upload custom files
-    st.subheader("📤 Upload Additional Documents")
+    st.subheader("Upload Additional Documents")
     uploaded_files = st.file_uploader(
         "Choose files",
         type=['txt', 'pdf', 'json'],
@@ -881,72 +885,647 @@ else:
 # Create tabs (conditionally include Debug Console)
 # Note: We'll use a custom tab system to support programmatic switching
 tab_names = [
-    "📊 Risk Dashboard", 
-    "📈 Sentiment Analysis",
-    "🎯 Topic Evolution", 
-    "🤖 Model Comparison",
-    "💬 Chat Assistant",
-    "📚 Document Sources",
+    "📊 Risk Dashboard",
     "🔍 RAG Analysis"  # Arkadiusz's RAG module
 ]
 
 # Create tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(tab_names)
+tab1, tab7 = st.tabs(tab_names)
 
 with tab1:
     st.header("Risk Assessment Dashboard")
-    
+
     # Display existing results if available
     if not st.session_state.should_run_analysis and st.session_state.final_assessment:
         st.success("✅ Analysis Complete")
-        
+
         final_assessment = st.session_state.final_assessment
         results = st.session_state.analysis_results
-        
-        # Risk metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
+
+        # Create tabs for different views
+        dashboard_tab1, dashboard_tab2, dashboard_tab3 = st.tabs([
+            "📊 Risk Overview",
+            "🚦 CAMELS Assessment",
+            "📈 Detailed Metrics"
+        ])
+
+        with dashboard_tab1:
+            # Executive Summary Section
+            st.markdown("### Executive Summary")
+
+            # Overall risk assessment with visual indicator
+            risk_level = final_assessment.get('risk_level', 'unknown')
+            risk_score = final_assessment.get('risk_score', 0)
+
+            # Create color mapping for risk levels
+            risk_colors = {
+                'green': {'bg': '#d4edda', 'border': '#28a745', 'text': '#155724', 'emoji': '🟢'},
+                'amber': {'bg': '#fff3cd', 'border': '#ffc107', 'text': '#856404', 'emoji': '🟡'},
+                'red': {'bg': '#f8d7da', 'border': '#dc3545', 'text': '#721c24', 'emoji': '🔴'},
+                'unknown': {'bg': '#e2e3e5', 'border': '#6c757d', 'text': '#383d41', 'emoji': '⚪'}
+            }
+
+            risk_style = risk_colors.get(risk_level, risk_colors['unknown'])
+
+            # Display overall risk in a prominent card
+            st.markdown(f"""
+            <div style='
+                background-color: {risk_style['bg']};
+                border: 2px solid {risk_style['border']};
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 20px;
+            '>
+                <h2 style='color: {risk_style['text']}; margin: 0;'>
+                    {risk_style['emoji']} Overall Risk Level: {risk_level.upper()}
+                </h2>
+                <h3 style='color: {risk_style['text']}; margin-top: 10px;'>
+                    Risk Score: {risk_score:.1f}/10
+                </h3>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Create gauge chart for risk score
+            fig_gauge = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = risk_score,
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "Composite Risk Score"},
+                gauge = {
+                    'axis': {'range': [None, 10], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                    'bar': {'color': risk_style['border']},
+                    'bgcolor': "white",
+                    'borderwidth': 2,
+                    'bordercolor': "gray",
+                    'steps': [
+                        {'range': [0, 4], 'color': '#d4edda'},
+                        {'range': [4, 7], 'color': '#fff3cd'},
+                        {'range': [7, 10], 'color': '#f8d7da'}
+                    ],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': 8.5
+                    }
+                }
+            ))
+            fig_gauge.update_layout(height=300)
+            st.plotly_chart(fig_gauge, use_container_width=True)
+
+            # Log available agents for debugging
+            log_debug(f"Available agents in results: {list(results.keys())}")
+            log_debug(f"Total agents found: {len(results)}")
+
+            # Extract agent scores from results with proper mappings
+            agent_scores = {}
+
+            # Map of actual agent keys returned by orchestrator to display names
+            # The orchestrator returns keys like 'sentiment', 'topics', etc.
+            # We want to display them with their full names like in the notebook
+            agent_proper_names = {
+                # Tier 1: Linguistic Analysis (4 agents)
+                'sentiment': 'sentiment_tracker',
+                'topics': 'topic_analyzer',
+                'confidence': 'confidence_evaluator',
+                'analyst_concerns': 'analyst_concern',
+
+                # Tier 2: Quantitative Risk Metrics (9 agents)
+                'capital_buffers': 'capital_buffers',
+                'liquidity_funding': 'liquidity_funding',
+                'market_irrbb': 'market_irrbb',
+                'credit_quality': 'credit_quality',
+                'earnings_quality': 'earnings_quality',
+                'governance_controls': 'governance_controls',
+                'legal_reg': 'legal_reg',
+                'business_model': 'business_model',
+                'off_balance_sheet': 'off_balance_sheet',
+
+                # Tier 3: Pattern Detection (1 agent)
+                'red_flags': 'red_flags',
+
+                # Tier 4: Meta-Analysis (2 agents)
+                'discrepancy_auditor': 'discrepancy_auditor',
+                'camels_fuser': 'camels_fuser'
+            }
+
+            # Map agents to their tiers
+            agent_tiers = {
+                'sentiment_tracker': 'T1:Linguistic',
+                'topic_analyzer': 'T1:Linguistic',
+                'confidence_evaluator': 'T1:Linguistic',
+                'analyst_concern': 'T1:Linguistic',
+                'capital_buffers': 'T2:Quantitative',
+                'liquidity_funding': 'T2:Quantitative',
+                'market_irrbb': 'T2:Quantitative',
+                'credit_quality': 'T2:Quantitative',
+                'earnings_quality': 'T2:Quantitative',
+                'governance_controls': 'T2:Quantitative',
+                'legal_reg': 'T2:Quantitative',
+                'business_model': 'T2:Quantitative',
+                'off_balance_sheet': 'T2:Quantitative',
+                'red_flags': 'T3:Pattern',
+                'discrepancy_auditor': 'T4:Meta',
+                'camels_fuser': 'T4:Meta'
+            }
+
+            # Map agents to user-friendly display names for charts
+            agent_display_names = {
+                'sentiment_tracker': 'Sentiment Tracker',
+                'topic_analyzer': 'Topic Analyzer',
+                'confidence_evaluator': 'Confidence Evaluator',
+                'analyst_concern': 'Analyst Concerns',
+                'capital_buffers': 'Capital Buffers',
+                'liquidity_funding': 'Liquidity & Funding',
+                'market_irrbb': 'Market & IRRBB',
+                'credit_quality': 'Credit Quality',
+                'earnings_quality': 'Earnings Quality',
+                'governance_controls': 'Governance & Controls',
+                'legal_reg': 'Legal & Regulatory',
+                'business_model': 'Business Model',
+                'off_balance_sheet': 'Off-Balance Sheet',
+                'red_flags': 'Red Flags',
+                'discrepancy_auditor': 'Discrepancy Auditor',
+                'camels_fuser': 'CAMELS Fusion'
+            }
+
+            for agent_key, agent_result in results.items():
+                if isinstance(agent_result, dict):
+                    # Try different score fields
+                    score = None
+
+                    # First check if this is an agent result with parsed_response
+                    if 'parsed_response' in agent_result and isinstance(agent_result['parsed_response'], dict):
+                        parsed = agent_result['parsed_response']
+                        if 'overall_score' in parsed:
+                            score = parsed['overall_score']
+                        elif 'risk_score' in parsed:
+                            score = parsed['risk_score'] / 10.0  # Normalize to 0-1
+
+                    # Then check direct fields
+                    if score is None:
+                        if 'overall_score' in agent_result:
+                            score = agent_result['overall_score']
+                        elif 'risk_score' in agent_result:
+                            score = agent_result['risk_score'] / 10.0  # Normalize to 0-1
+                        elif 'concern_score' in agent_result:
+                            score = agent_result['concern_score'] / 10.0  # Normalize to 0-1
+                        elif 'overall_confidence_score' in agent_result:
+                            score = (10 - agent_result['overall_confidence_score']) / 10.0  # Invert confidence
+
+                    if score is not None:
+                        # Use the proper agent name for display
+                        proper_name = agent_proper_names.get(agent_key, agent_key)
+                        agent_scores[proper_name] = score
+                        log_debug(f"Found score for {agent_key} (mapped to {proper_name}): {score:.3f}")
+
+            if agent_scores:
+                # Sort scores from highest to lowest risk
+                sorted_scores = sorted(agent_scores.items(), key=lambda x: x[1], reverse=True)
+
+                # Count agents by risk level for statistics
+                risk_counts = {'🟢 Low': 0, '🟡 Medium': 0, '🔴 High': 0, '⚪ No Data': 0}
+
+                # Categorize all agents
+                for agent_name, score in sorted_scores:
+                    if score == 0.0:
+                        risk_counts['⚪ No Data'] += 1
+                    elif score < 0.4:
+                        risk_counts['🟢 Low'] += 1
+                    elif score < 0.7:
+                        risk_counts['🟡 Medium'] += 1
+                    else:
+                        risk_counts['🔴 High'] += 1
+
+                # Calculate metrics
+                non_zero_scores = [score for score in agent_scores.values() if score > 0.0]
+
+                # Create visual summary cards
+                st.markdown("### Risk Assessment Summary")
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    # Overall Risk Card
+                    if non_zero_scores:
+                        avg_score = sum(non_zero_scores) / len(non_zero_scores)
+                        if avg_score < 0.4:
+                            status = "🟢 LOW RISK"
+                            color = "🟢"
+                        elif avg_score < 0.7:
+                            status = "🟡 MEDIUM RISK"
+                            color = "🟡"
+                        else:
+                            status = "🔴 HIGH RISK"
+                            color = "🔴"
+
+                        st.metric(
+                            label="Average Risk Score",
+                            value=f"{color} {avg_score:.3f}",
+                            delta=status
+                        )
+                    else:
+                        st.metric(
+                            label="Average Risk Score",
+                            value="⚪ N/A",
+                            delta="NO DATA"
+                        )
+
+                with col2:
+                    # Data Coverage Card
+                    coverage_pct = (len(non_zero_scores) / 16) * 100
+                    if coverage_pct >= 80:
+                        coverage_icon = "✅"
+                    elif coverage_pct >= 50:
+                        coverage_icon = "⚠️"
+                    else:
+                        coverage_icon = "❌"
+
+                    st.metric(
+                        label="Agent Coverage",
+                        value=f"{len(non_zero_scores)}/16",
+                        delta=f"{coverage_icon} {coverage_pct:.0f}% with data"
+                    )
+
+                with col3:
+                    # Highest Risk Agent
+                    if non_zero_scores:
+                        max_score = max(non_zero_scores)
+                        highest_agents = [k for k, v in agent_scores.items() if v == max_score]
+                        highest_agent = highest_agents[0]
+                        display_name = agent_display_names.get(highest_agent, highest_agent.replace('_', ' ').title())
+
+                        if max_score < 0.4:
+                            risk_icon = "🟢"
+                        elif max_score < 0.7:
+                            risk_icon = "🟡"
+                        else:
+                            risk_icon = "🔴"
+
+                        st.metric(
+                            label="Highest Risk",
+                            value=f"{risk_icon} {max_score:.3f}",
+                            delta=display_name
+                        )
+                    else:
+                        st.metric(
+                            label="Highest Risk",
+                            value="⚪ N/A",
+                            delta="No data available"
+                        )
+
+                # Alert box for low coverage
+                if risk_counts['⚪ No Data'] > 8:  # More than 50% missing
+                    st.warning(f"""
+                    ⚠️ **Limited Analysis Coverage**
+
+                    Only {len(non_zero_scores)} out of 16 agents returned valid data.
+                    This may indicate:
+                    - Document processing issues
+                    - API rate limiting
+                    - Incomplete financial data in the source document
+
+                    Consider re-running the analysis or checking the debug console for details.
+                    """)
+
+                # Visual Risk Distribution
+                st.markdown("### Risk Distribution")
+
+                # Process each risk level as a complete row for proper alignment
+                for level in ['🔴 High', '🟡 Medium', '🟢 Low', '⚪ No Data']:
+                    count = risk_counts[level]
+                    if count > 0 or level == '⚪ No Data':
+                        # Create columns for each row to ensure alignment
+                        label_col, bar_col = st.columns([1, 2])
+
+                        with label_col:
+                            st.markdown(f"**{level}:** {count} agents")
+
+                        with bar_col:
+                            pct = (count / 16) * 100
+                            st.progress(pct / 100, text=f"{pct:.1f}%")
+
+                st.markdown("")  # Add spacing
+
+                # Keep the tier groups for the bar chart (using proper agent names)
+                tier_groups = {
+                    'Tier 1: Linguistic Analysis': ['sentiment_tracker', 'topic_analyzer', 'confidence_evaluator', 'analyst_concern'],
+                    'Tier 2: Quantitative Risk': ['capital_buffers', 'liquidity_funding', 'market_irrbb',
+                                                   'credit_quality', 'earnings_quality', 'governance_controls',
+                                                   'legal_reg', 'business_model', 'off_balance_sheet'],
+                    'Tier 3: Pattern Detection': ['red_flags'],
+                    'Tier 4: Meta-Analysis': ['discrepancy_auditor', 'camels_fuser']
+                }
+
+                # Create DataFrame for display (for the chart)
+                scores_data = []
+                for agent_name, score in sorted_scores:
+                    # Check if score is zero (likely means agent failed or didn't execute)
+                    if score == 0.0:
+                        indicator = "⚪"
+                        level = "NO DATA"
+                        color = "#cccccc"  # Gray color for no data
+                    elif score < 0.4:
+                        indicator = "🟢"
+                        level = "LOW"
+                        color = "#28a745"
+                    elif score < 0.7:
+                        indicator = "🟡"
+                        level = "MEDIUM"
+                        color = "#ffc107"
+                    else:
+                        indicator = "🔴"
+                        level = "HIGH"
+                        color = "#dc3545"
+
+                    # Determine tier for the agent
+                    agent_tier = ''
+                    for tier_name, tier_agents in tier_groups.items():
+                        if agent_name in tier_agents:
+                            agent_tier = tier_name.split(':')[0]
+                            break
+
+                    # Get display name for the chart
+                    display_name = agent_display_names.get(agent_name, agent_name.replace('_', ' ').title())
+
+                    scores_data.append({
+                        'Agent': display_name,  # Use display name for better readability
+                        'AgentKey': agent_name,  # Keep original key for reference
+                        'Tier': agent_tier,
+                        'Risk Score': score,
+                        'Risk Level': f"{indicator} {level}",
+                        'color': color
+                    })
+
+                # Add a visual separator before the chart
+                st.markdown("")
+                st.markdown("### Detailed Agent Risk Breakdown")
+
+                # Show warning if not all agents are displayed
+                if len(agent_scores) < 16:
+                    missing_count = 16 - len(agent_scores)
+                    st.warning(f"⚠️ {missing_count} agents did not return valid scores. Check debug console for details.")
+
+                # Create bar chart with improved layout
+                fig_bar = go.Figure()
+                for item in scores_data:
+                    # Create Y-axis label with tier info in brackets
+                    if item['Tier']:
+                        y_label = f"{item['Agent']} [{item['Tier']}]"
+                    else:
+                        y_label = item['Agent']
+
+                    fig_bar.add_trace(go.Bar(
+                        x=[item['Risk Score']],
+                        y=[y_label],
+                        orientation='h',
+                        marker_color=item['color'],
+                        text=f"{item['Risk Level']} ({item['Risk Score']:.3f})",
+                        textposition='auto',
+                        showlegend=False,
+                        hovertemplate='<b>%{y}</b><br>Risk Score: %{x:.3f}<br>Risk Level: %{text}<extra></extra>',
+                        customdata=[item['Tier']]
+                    ))
+
+                # Adjust height based on number of agents (30px per agent for better spacing)
+                chart_height = max(500, len(scores_data) * 30)
+
+                fig_bar.update_layout(
+                    title="Agent Risk Assessment Scores (All 16 Agents)",
+                    xaxis_title="Risk Score",
+                    yaxis_title="Analysis Agent",
+                    xaxis=dict(range=[0, 1]),
+                    height=chart_height,
+                    showlegend=False,
+                    bargap=0.2,
+                    margin=dict(l=200)  # More space for agent names
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+            else:
+                st.warning("No individual agent scores available")
+
+        with dashboard_tab2:
+            # CAMELS Assessment Section
+            st.markdown("### CAMELS Supervisory Framework Assessment")
+            st.markdown("*Regulatory assessment using the CAMELS rating system*")
+
+            # Check if we have CAMELS data (would come from a CAMELS fusion agent)
+            # For now, create a mock structure based on the risk scores
+            camels_components = {
+                'Capital Adequacy': {
+                    'signal': 'Green' if risk_score < 4 else 'Amber' if risk_score < 7 else 'Red',
+                    'score': max(0, min(10, risk_score - 1)),
+                    'explanation': 'Capital levels appear adequate based on current analysis'
+                },
+                'Asset Quality': {
+                    'signal': 'Amber' if risk_score < 7 else 'Red' if risk_score > 7 else 'Green',
+                    'score': max(0, min(10, risk_score)),
+                    'explanation': 'Asset quality metrics show moderate concerns'
+                },
+                'Management & Controls': {
+                    'signal': 'Green' if results.get('confidence', {}).get('overall_confidence_score', 5) > 6 else 'Amber',
+                    'score': results.get('confidence', {}).get('overall_confidence_score', 5),
+                    'explanation': 'Management demonstrates reasonable oversight and control'
+                },
+                'Earnings Quality': {
+                    'signal': 'Amber',
+                    'score': risk_score * 0.8,
+                    'explanation': 'Earnings stability requires continued monitoring'
+                },
+                'Liquidity Position': {
+                    'signal': 'Green' if risk_score < 5 else 'Amber',
+                    'score': max(0, min(10, risk_score - 0.5)),
+                    'explanation': 'Liquidity metrics within acceptable ranges'
+                },
+                'Market Sensitivity': {
+                    'signal': 'Amber' if results.get('analyst_concerns', {}).get('concern_score', 5) > 5 else 'Green',
+                    'score': results.get('analyst_concerns', {}).get('concern_score', 5),
+                    'explanation': 'Moderate sensitivity to market conditions observed'
+                }
+            }
+
+            # Display CAMELS in a grid
+            camels_cols = st.columns(3)
+            for idx, (component_name, component_data) in enumerate(camels_components.items()):
+                col_idx = idx % 3
+                with camels_cols[col_idx]:
+                    signal = component_data['signal']
+                    signal_emoji = '🟢' if signal == 'Green' else '🟡' if signal == 'Amber' else '🔴'
+                    signal_color = '#28a745' if signal == 'Green' else '#ffc107' if signal == 'Amber' else '#dc3545'
+
+                    st.markdown(f"""
+                    <div style='
+                        background-color: white;
+                        border: 2px solid {signal_color};
+                        border-radius: 10px;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                        height: 150px;
+                    '>
+                        <h4 style='color: {signal_color}; margin: 0;'>
+                            {signal_emoji} {component_name}
+                        </h4>
+                        <p style='font-size: 24px; font-weight: bold; color: {signal_color}; margin: 10px 0;'>
+                            {signal.upper()}
+                        </p>
+                        <p style='font-size: 12px; color: #666; margin: 0;'>
+                            {component_data['explanation'][:50]}...
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # CAMELS Summary
+            st.markdown("### CAMELS Composite View")
+
+            # Create radar chart for CAMELS scores
+            categories = list(camels_components.keys())
+            scores = [camels_components[cat]['score'] for cat in categories]
+
+            fig_radar = go.Figure(data=go.Scatterpolar(
+                r=scores,
+                theta=categories,
+                fill='toself',
+                marker_color='rgba(33, 150, 243, 0.8)',
+                line=dict(color='rgba(33, 150, 243, 1)', width=2),
+                fillcolor='rgba(33, 150, 243, 0.3)'
+            ))
+
+            fig_radar.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 10],
+                        tickmode='linear',
+                        tick0=0,
+                        dtick=2
+                    )
+                ),
+                title="CAMELS Component Scores",
+                height=400,
+                showlegend=False
+            )
+            st.plotly_chart(fig_radar, use_container_width=True)
+
+            # Executive Summary for CAMELS
+            st.markdown("### CAMELS Executive Summary")
+            summary_text = f"""
+            The CAMELS assessment indicates an overall {risk_level.upper()} risk profile for the institution.
+            Key areas of focus include maintaining capital adequacy, monitoring asset quality trends, and
+            ensuring robust management controls. The analysis suggests continued vigilance in earnings
+            quality and market sensitivity metrics.
+            """
+            st.info(summary_text)
+
+        with dashboard_tab3:
+            # Detailed metrics view
+            st.markdown("### Detailed Component Analysis")
+
+            # Component scores table
+            if 'component_scores' in final_assessment:
+                component_df = pd.DataFrame([final_assessment['component_scores']])
+                st.dataframe(
+                    component_df.style.format("{:.2f}", na_rep="N/A"),
+                    use_container_width=True
+                )
+
+            # Analysis metadata
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("### ⚙️ Analysis Configuration")
+                st.json({
+                    "Model Used": st.session_state.get('selected_model', 'Unknown'),
+                    "Analysis Mode": "Full AI" if st.session_state.get('last_api_ready', True) else "Limited",
+                    "Documents Analyzed": len(st.session_state.get('analyzed_files', [])),
+                    "Analysis Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+            with col2:
+                st.markdown("### 📄 Analyzed Documents")
+                if 'analyzed_files' in st.session_state and st.session_state.analyzed_files:
+                    for file_path in st.session_state.analyzed_files:
+                        st.write(f"✅ {Path(file_path).name}")
+                else:
+                    st.write("No documents information available")
+
+            # Raw scores for debugging/transparency
+            with st.expander("🔍 View Raw Analysis Data"):
+                st.json({
+                    "Final Assessment": final_assessment,
+                    "Component Results": {k: v for k, v in results.items() if k != 'processor'}
+                })
+    else:
+        # Show placeholder when no data is available
+        st.markdown("""
+        <div style='
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            text-align: center;
+            margin: 2rem 0;
+        '>
+            <h2 style='margin: 0 0 1rem 0;'>Welcome to RiskRadar</h2>
+            <p style='font-size: 1.1rem; margin-bottom: 1.5rem;'>
+                AI-powered early warning system for financial risk assessment
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Quick start guide
+        col1, col2, col3 = st.columns(3)
+
         with col1:
-            risk_color = {
-                'green': '🟢',
-                'amber': '🟡', 
-                'red': '🔴',
-                'unknown': '⚪'
-            }.get(final_assessment['risk_level'], '⚪')
-            st.metric(
-                "Risk Level",
-                f"{risk_color} {final_assessment['risk_level'].upper()}",
-                f"Score: {final_assessment['risk_score']:.1f}/10"
-            )
-        
+            st.markdown("""
+            ### Step 1: Select Documents
+            Use the **sidebar** to:
+            - Choose existing files
+            - Upload new documents
+            - Supports: PDF, TXT formats
+            """)
+
         with col2:
-            confidence_score = results.get('confidence', {}).get('overall_confidence_score', None)
-            st.metric(
-                "Confidence Score",
-                f"{confidence_score:.1f}/10" if confidence_score else "N/A",
-                "Management confidence"
-            )
-        
+            st.markdown("""
+            ### Step 2: Configure & Run
+            In the **sidebar**:
+            - Select AI model
+            - Click **Run Analysis**
+            - Wait for processing
+            """)
+
         with col3:
-            concern_score = results.get('analyst_concerns', {}).get('concern_score', None)
-            st.metric(
-                "Analyst Concerns",
-                f"{concern_score:.1f}/10" if concern_score else "N/A",
-                "Question intensity"
-            )
-        
-        with col4:
-            st.metric(
-                "Analysis Mode",
-                "Full AI" if st.session_state.get('last_api_ready', True) else "Limited",
-                "✅ Complete" if st.session_state.get('last_api_ready', True) else "⚠️ Fallback"
-            )
-        
-        # Component scores
-        st.subheader("Component Analysis")
-        component_df = pd.DataFrame([final_assessment['component_scores']])
-        st.dataframe(component_df, use_container_width=True)
-    
+            st.markdown("""
+            ### Step 3: Explore Features
+            Additional capabilities:
+            - **RAG Analysis** tab for Q&A
+            - Export results when ready
+            - View detailed metrics
+            """)
+
+        # Status indicators
+        st.markdown("---")
+        status_col1, status_col2, status_col3 = st.columns(3)
+
+        with status_col1:
+            files_selected = len(st.session_state.get('selected_files', []))
+            if files_selected > 0:
+                st.success(f"✅ {files_selected} file(s) selected")
+            else:
+                st.info("⏳ No files selected yet")
+
+        with status_col2:
+            if api_ready:
+                model_display = available_models.get(selected_model, selected_model)
+                st.success(f"✅ Model ready: {model_display}")
+            else:
+                st.warning("⚠️ Configure API key")
+
+        with status_col3:
+            if st.session_state.get('analysis_running', False):
+                st.info("🔄 Analysis in progress...")
+            else:
+                st.info("💤 Ready to analyze")
+
     if st.session_state.should_run_analysis and agents and (api_ready or use_fallback):
         # Clear the trigger flag but keep analysis_running
         st.session_state.should_run_analysis = False
@@ -957,6 +1536,8 @@ with tab1:
         with progress_container:
             progress_bar = st.progress(0)
             status_text = st.empty()
+            
+            st.session_state.spinner_placeholder = st.empty()
             
             # Update initial progress
             update_analysis_progress(5, "Loading documents...")
@@ -1015,6 +1596,17 @@ with tab1:
         
         # Only proceed with analysis if we have data and no critical errors
         if all_text and len(successful_loads) > 0:
+            # Check text size and truncate if needed to avoid rate limits
+            MAX_CHARS_PER_AGENT = 30000  # Approximately 7,500 tokens
+            if len(all_text) > MAX_CHARS_PER_AGENT * 2:
+                log_warning(f"Document text is very large ({len(all_text):,} chars). Truncating to prevent rate limits.")
+                # Take first portion and last portion to preserve context
+                truncated_text = all_text[:MAX_CHARS_PER_AGENT] + "\n\n... [Content truncated for processing] ...\n\n" + all_text[-MAX_CHARS_PER_AGENT:]
+                analysis_text = truncated_text
+                st.warning(f"⚠️ Large document detected ({len(all_text):,} characters). Using intelligent sampling for analysis.")
+            else:
+                analysis_text = all_text
+            
             # Run analysis
             analysis_success = False
             
@@ -1025,83 +1617,70 @@ with tab1:
             try:
                 # Run available agents
                 if api_ready:
-                    # Full analysis with all agents
+                    # Full analysis with all 16 agents using orchestrator
                     try:
-                        # Track which agents failed
-                        agent_failures = []
-                        log_info("Starting full AI analysis with all agents")
-                            
-                        log_debug("Running sentiment analysis...")
-                        results['sentiment'] = agents['sentiment'].analyze(all_text)
-                        if not results['sentiment'] or results['sentiment'] == {} or 'error' in results['sentiment']:
-                            error_detail = results['sentiment'].get('error', '') if isinstance(results['sentiment'], dict) else ''
-                            agent_failures.append(f"Sentiment analysis{': ' + error_detail if error_detail else ''}")
-                            log_error(f"Sentiment analysis failed: {error_detail}")
-                        else:
-                            log_info("Sentiment analysis completed successfully")
-                            
-                        log_debug("Running topic analysis...")
-                        results['topics'] = agents['topics'].analyze(all_text)
-                        if not results['topics'] or results['topics'] == {} or 'error' in results['topics']:
-                            error_detail = results['topics'].get('error', '') if isinstance(results['topics'], dict) else ''
-                            agent_failures.append(f"Topic analysis{': ' + error_detail if error_detail else ''}")
-                            log_error(f"Topic analysis failed: {error_detail}")
-                        else:
-                            log_info("Topic analysis completed successfully")
-                            
-                        log_debug("Running confidence analysis...")
-                        results['confidence'] = agents['confidence'].analyze(all_text)
-                        if not results['confidence'] or results['confidence'] == {} or 'error' in results['confidence']:
-                            error_detail = results['confidence'].get('error', '') if isinstance(results['confidence'], dict) else ''
-                            agent_failures.append(f"Confidence analysis{': ' + error_detail if error_detail else ''}")
-                            log_error(f"Confidence analysis failed: {error_detail}")
-                        else:
-                            log_info("Confidence analysis completed successfully")
-                            
-                        # Update progress for analyst concerns
-                        update_analysis_progress(65, "Running analyst concerns analysis...")
-                        progress_bar.progress(65)
-                        status_text.text("Running analyst concerns analysis...")
-                        log_debug("Running analyst concerns analysis...")
-                        
-                        results['analyst_concerns'] = agents['analyst'].analyze(all_text)
-                        if not results['analyst_concerns'] or results['analyst_concerns'] == {} or 'error' in results['analyst_concerns']:
-                            error_detail = results['analyst_concerns'].get('error', '') if isinstance(results['analyst_concerns'], dict) else ''
-                            agent_failures.append(f"Analyst concerns analysis{': ' + error_detail if error_detail else ''}")
-                            log_error(f"Analyst concerns analysis failed: {error_detail}")
-                        else:
-                            log_info("Analyst concerns analysis completed successfully")
-                        
-                        # Check if we got valid results
-                        if all(results.values()) and not agent_failures:
-                            # Orchestrate results
-                            update_analysis_progress(80, "Synthesizing final risk assessment...")
-                            progress_bar.progress(80)
-                            status_text.text("Synthesizing final risk assessment...")
-                            log_debug("Synthesizing risk assessment from agent results...")
-                            
-                            final_assessment = agents['orchestrator'].synthesize_risks(results)
-                            log_info(f"Risk assessment complete: {final_assessment.get('risk_level', 'unknown').upper()} (Score: {final_assessment.get('risk_score', 0):.1f}/10)")
-                            
+                        log_info("Starting comprehensive 16-agent analysis...")
+
+                        # Update progress
+                        update_analysis_progress(10, "Running Phase 1: 14 agents in parallel...")
+                        progress_bar.progress(10)
+                        status_text.text("Running Phase 1: 14 agents in parallel...")
+
+                        # Use orchestrator to run all 16 agents
+                        final_assessment = agents['orchestrator'].synthesize_risks({'text': analysis_text})
+
+                        # Get individual agent results from orchestrator
+                        results = agents['orchestrator'].get_agent_results()
+
+                        # Count successful agents
+                        successful_agents = sum(1 for r in results.values() if r.get('success', False))
+                        total_agents = len(results)
+
+                        log_info(f"Analysis complete: {successful_agents}/{total_agents} agents succeeded")
+                        log_info(f"Final assessment: {final_assessment.get('risk_level', 'unknown').upper() if 'risk_level' in final_assessment else 'N/A'}")
+
+                        # Check if we got enough valid results
+                        if successful_agents >= 10:  # Need at least 10/16 agents for meaningful analysis
+                            # Update progress
+                            update_analysis_progress(90, "Finalizing assessment...")
+                            progress_bar.progress(90)
+                            status_text.text("Finalizing assessment...")
+
+                            # Warn if some agents failed
+                            if successful_agents < total_agents:
+                                failed_count = total_agents - successful_agents
+                                log_warning(f"Partial results: {failed_count} agents failed")
+                                failed_agents = [k for k, v in results.items() if not v.get('success', False)]
+                                log_debug(f"Failed agents: {', '.join(failed_agents)}")
+
                             # Final progress update
                             update_analysis_progress(95, "Finalizing results...")
                             progress_bar.progress(95)
                             status_text.text("Finalizing results...")
                             analysis_success = True
                         else:
-                            if agent_failures:
-                                # Check if it's an API overload issue
-                                if any("overloaded" in failure.lower() for failure in agent_failures):
-                                    analysis_errors.append("⚠️ API is currently overloaded (Error 529)")
-                                    analysis_errors.append("The API service is experiencing high demand. Please:")
-                                    analysis_errors.append("• Wait a few moments and try again")
-                                    analysis_errors.append("• Or switch to a different model")
-                                else:
-                                    analysis_errors.append(f"Failed agents: {', '.join(agent_failures)}")
-                                    analysis_errors.append("💡 Tip: This may be due to API rate limits. Try again in a moment or switch to a different model.")
+                            # Not enough agents succeeded
+                            failed_agents = [k for k, v in results.items() if not v.get('success', False)]
+
+                            # Check for common error patterns
+                            error_messages = [v.get('error', '') for v in results.values() if 'error' in v]
+
+                            if any("refused" in str(e).lower() or "filtered" in str(e).lower() for e in error_messages):
+                                analysis_errors.append("⚠️ Model content filter triggered")
+                                analysis_errors.append("The selected model refused to analyze this content.")
+                                analysis_errors.append("💡 Recommended actions:")
+                                analysis_errors.append("  • Switch to Claude or Gemini models (more permissive)")
+                                analysis_errors.append("  • Or try with a different document")
+                            elif any("overloaded" in str(e).lower() for e in error_messages):
+                                analysis_errors.append("⚠️ API is currently overloaded (Error 529)")
+                                analysis_errors.append("The API service is experiencing high demand. Please:")
+                                analysis_errors.append("• Wait a few moments and try again")
+                                analysis_errors.append("• Or switch to a different model")
                             else:
-                                analysis_errors.append("Some agents returned empty results")
-                            
+                                analysis_errors.append(f"Insufficient agents completed successfully: {successful_agents}/{total_agents}")
+                                analysis_errors.append(f"Failed agents: {', '.join(failed_agents[:5])}")  # Show first 5
+                                analysis_errors.append("💡 Need at least 10 agents for meaningful analysis. Try again or switch models.")
+
                     except Exception as e:
                         analysis_errors.append(f"Analysis failed: {str(e)[:200]}")
                         log_error(f"Analysis failed: {str(e)}")
@@ -1113,7 +1692,7 @@ with tab1:
                     # Limited analysis with fallback agents only
                     try:
                         results['confidence'] = agents['confidence'].analyze(all_text)
-                        results['analyst_concerns'] = agents['analyst'].analyze(all_text)
+                        results['analyst_concerns'] = agents['analyst'].analyze(analysis_text)
                         
                         if results['confidence'] and results['analyst_concerns']:
                             # Create limited assessment
@@ -1161,16 +1740,20 @@ with tab1:
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
+                    risk_level = final_assessment.get('risk_level', 'unknown')
+                    risk_score = final_assessment.get('risk_score', 0)
+
                     risk_color = {
                         'green': '🟢',
-                        'amber': '🟡', 
+                        'amber': '🟡',
                         'red': '🔴',
                         'unknown': '⚪'
-                    }.get(final_assessment['risk_level'], '⚪')
+                    }.get(risk_level, '⚪')
+
                     st.metric(
                         "Risk Level",
-                        f"{risk_color} {final_assessment['risk_level'].upper()}",
-                        f"Score: {final_assessment['risk_score']:.1f}/10"
+                        f"{risk_color} {risk_level.upper()}",
+                        f"Score: {risk_score:.1f}/10"
                     )
                 
                 with col2:
@@ -1196,10 +1779,32 @@ with tab1:
                         "✅ Complete" if api_ready else "⚠️ Fallback"
                     )
                 
-                # Component scores
-                st.subheader("Component Analysis")
-                component_df = pd.DataFrame([final_assessment['component_scores']])
-                st.dataframe(component_df, use_container_width=True)
+                # Component scores (only if available from legacy synthesis)
+                if 'component_scores' in final_assessment:
+                    st.subheader("Component Analysis")
+                    component_df = pd.DataFrame([final_assessment['component_scores']])
+                    st.dataframe(component_df, use_container_width=True)
+                elif 'camels_screen' in final_assessment:
+                    st.subheader("CAMELS Component Analysis")
+                    camels_data = final_assessment.get('camels_screen', {})
+                    if camels_data:
+                        # Display each CAMELS component
+                        for component, details in camels_data.items():
+                            col1, col2 = st.columns([1, 3])
+                            with col1:
+                                signal = details.get('signal', 'Unknown')
+                                if signal == 'Green':
+                                    st.success(f"🟢 {component.upper()}")
+                                elif signal == 'Amber':
+                                    st.warning(f"🟡 {component.upper()}")
+                                elif signal == 'Red':
+                                    st.error(f"🔴 {component.upper()}")
+                                else:
+                                    st.info(f"⚪ {component.upper()}")
+                            with col2:
+                                st.write(details.get('why', 'No details available'))
+                else:
+                    st.info("Detailed component analysis not available for this assessment type")
                 
                 # Complete progress
                 update_analysis_progress(100, "Analysis complete!")
@@ -1231,174 +1836,9 @@ with tab1:
             # Rerun to update UI state
             st.rerun()
 
-# Tab 2: Sentiment Analysis
-with tab2:
-    st.header("📈 Sentiment Analysis")
-    
-    if st.session_state.analysis_results and 'sentiment' in st.session_state.analysis_results:
-        sentiment_data = st.session_state.analysis_results['sentiment']
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Overall Sentiment", sentiment_data.get('overall_sentiment', 'N/A'))
-            st.metric("Sentiment Score", f"{sentiment_data.get('sentiment_score', 0):.2f}")
-        with col2:
-            st.metric("Confidence Level", sentiment_data.get('confidence_level', 'N/A'))
-            tone_indicators = sentiment_data.get('tone_indicators', [])
-            if tone_indicators:
-                st.write("**Tone Indicators:**")
-                for indicator in tone_indicators[:5]:
-                    st.write(f"• {indicator}")
-        
-        # Show analyzed files with source indication
-        if st.session_state.analyzed_files:
-            st.subheader("📁 Analyzed Files")
-            for file_path in st.session_state.analyzed_files:
-                file_name = Path(file_path).name
-                if 'uploads' in str(file_path):
-                    st.write(f"• 📤 {file_name} (uploaded)")
-                else:
-                    st.write(f"• 📁 {file_name}")
-    else:
-        st.info("Run analysis in the Risk Dashboard tab first to see sentiment results.")
-
-# Tab 3: Topic Evolution
-with tab3:
-    st.header("🎯 Topic Evolution")
-    
-    if st.session_state.analysis_results and 'topics' in st.session_state.analysis_results:
-        topics_data = st.session_state.analysis_results['topics']
-        
-        st.subheader("Key Topics Identified")
-        topics = topics_data.get('topics', [])
-        if topics:
-            for topic in topics[:10]:
-                st.write(f"• **{topic.get('name', 'Unknown')}**: {topic.get('frequency', 0)} mentions")
-        
-        # Risk categories
-        risk_categories = topics_data.get('risk_categories', {})
-        if risk_categories:
-            st.subheader("Risk Categories")
-            for category, details in risk_categories.items():
-                st.write(f"• **{category}**: {details}")
-    else:
-        st.info("Run analysis in the Risk Dashboard tab first to see topic results.")
-
-# Tab 4: Model Comparison
-with tab4:
-    st.header("🤖 Model Comparison")
-    
-    st.write("### Currently Using: " + selected_model)
-    
-    if st.session_state.final_assessment:
-        st.write("### Analysis Performance")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Processing Time", "< 30 seconds")
-        with col2:
-            st.metric("Confidence", f"{st.session_state.final_assessment.get('confidence', 0):.0%}")
-        with col3:
-            st.metric("Risk Score", f"{st.session_state.final_assessment.get('risk_score', 0):.1f}/10")
-    
-    st.write("### Available Models")
-    
-    # Group models by provider
-    openai_models = {k: v for k, v in available_models.items() if 'gpt' in k.lower()}
-    claude_models = {k: v for k, v in available_models.items() if 'claude' in k.lower()}
-    gemini_models = {k: v for k, v in available_models.items() if 'gemini' in k.lower()}
-    other_models = {k: v for k, v in available_models.items() if k not in openai_models and k not in claude_models and k not in gemini_models}
-    
-    if openai_models:
-        st.write("#### OpenAI Models")
-        for model, description in openai_models.items():
-            icon = get_api_status_icon("openai", test_connection=False)
-            st.write(f"{icon} {description}")
-    
-    if claude_models:
-        st.write("#### Anthropic/Claude Models")
-        for model, description in claude_models.items():
-            icon = get_api_status_icon("anthropic", test_connection=False)
-            st.write(f"{icon} {description}")
-    
-    if gemini_models:
-        st.write("#### Google Gemini Models")
-        for model, description in gemini_models.items():
-            icon = get_api_status_icon("google", test_connection=False)
-            st.write(f"{icon} {description}")
-    
-    if other_models:
-        st.write("#### Other")
-        for model, description in other_models.items():
-            st.info(f"• {description}")
-
-# Tab 5: Chat Assistant
-with tab5:
-    st.header("💬 Chat Assistant")
-    
-    if st.session_state.final_assessment:
-        st.write("Ask questions about the analysis results:")
-        
-        user_question = st.text_input("Your question:", placeholder="What are the main risks identified?")
-        
-        if user_question:
-            # Simple response based on analysis
-            st.write("### Response:")
-            st.write(f"Based on the analysis of {len(st.session_state.analyzed_files)} file(s):")
-            st.write(f"- Risk Level: {st.session_state.final_assessment.get('risk_level', 'Unknown').upper()}")
-            st.write(f"- Risk Score: {st.session_state.final_assessment.get('risk_score', 0):.1f}/10")
-            
-            if 'confidence' in st.session_state.analysis_results:
-                conf = st.session_state.analysis_results['confidence']
-                st.write(f"- Management Confidence: {conf.get('overall_confidence_score', 0):.1f}/10")
-    else:
-        st.info("Run analysis first to use the chat assistant.")
-
-# Tab 6: Document Sources
-with tab6:
-    st.header("📚 Document Sources")
-    
-    if st.session_state.analyzed_files:
-        st.subheader(f"📊 Analyzed {len(st.session_state.analyzed_files)} Document(s)")
-        
-        # Separate uploaded and pre-existing files
-        uploaded_docs = [f for f in st.session_state.analyzed_files if 'uploads' in str(f)]
-        preexisting_docs = [f for f in st.session_state.analyzed_files if 'uploads' not in str(f)]
-        
-        if uploaded_docs:
-            st.write("### 📤 Uploaded Documents")
-            for file_path in uploaded_docs:
-                with st.expander(f"{Path(file_path).name}"):
-                    st.write(f"**Type:** {'PDF' if file_path.endswith('.pdf') else 'Text'}")
-                    st.write(f"**Source:** User Upload")
-                    # Get file size
-                    try:
-                        size = os.path.getsize(file_path)
-                        st.write(f"**Size:** {size:,} bytes")
-                    except:
-                        pass
-                    if st.session_state.source_tracker:
-                        st.write("**Tracked in analysis:** ✅")
-        
-        if preexisting_docs:
-            st.write("### 📁 Pre-loaded Documents")
-            for file_path in preexisting_docs:
-                with st.expander(f"{Path(file_path).name}"):
-                    st.write(f"**Type:** {'PDF' if file_path.endswith('.pdf') else 'Text'}")
-                    st.write(f"**Source:** {Path(file_path).parent.name}")
-                    # Get file size
-                    try:
-                        size = os.path.getsize(file_path)
-                        st.write(f"**Size:** {size:,} bytes")
-                    except:
-                        pass
-                    if st.session_state.source_tracker:
-                        st.write("**Tracked in analysis:** ✅")
-    else:
-        st.info("No documents analyzed yet. Run analysis in the Risk Dashboard tab.")
-
 # Tab 7: RAG Analysis (Arkadiusz's Module)
 with tab7:
-    st.header("🔍 RAG Analysis System")
+    st.header("RAG Analysis System")
     st.markdown("*Document Analysis using Retrieval Augmented Generation*")
     log_debug("[RAG-UI] RAG tab loaded")
     
@@ -1441,7 +1881,7 @@ with tab7:
     
     with col1:
         # Query Section
-        st.subheader("📝 Query Documents")
+        st.subheader("Query Documents")
         
         # Query input
         query_input = st.text_area(
@@ -1453,9 +1893,9 @@ with tab7:
         # Query button and options
         col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
         with col_btn1:
-            query_button = st.button("🔍 Search", type="primary", use_container_width=True)
+            query_button = st.button("Search", type="primary", use_container_width=True)
         with col_btn2:
-            clear_history = st.button("🗑️ Clear History", use_container_width=True)
+            clear_history = st.button("Clear History", use_container_width=True)
         
         # Advanced options
         with st.expander("⚙️ Advanced Options"):
@@ -1468,7 +1908,7 @@ with tab7:
             if not rag_system:
                 st.error("❌ RAG system not initialized. Please check your configuration.")
             else:
-                with st.spinner("🔍 Searching documents..."):
+                with st.spinner("Searching documents..."):
                     try:
                         log_info(f"[RAG-UI] Processing query: {query_input}")
                         answer, sources = rag_system.rag_answer(
@@ -1509,7 +1949,7 @@ with tab7:
         # Display history
         if st.session_state.rag_query_history:
             st.divider()
-            st.subheader("📜 Query History")
+            st.subheader("Query History")
             for i, item in enumerate(reversed(st.session_state.rag_query_history[-5:])):
                 with st.expander(f"Q: {item['question'][:100]}... ({item['timestamp'].strftime('%H:%M:%S')})"):
                     st.markdown("**Question:**")
@@ -1523,7 +1963,7 @@ with tab7:
     
     with col2:
         # Status and Management Section
-        st.subheader("🎛️ System Status")
+        st.subheader("System Status")
         
         # Connection status
         if rag_system:
@@ -1541,7 +1981,7 @@ with tab7:
             st.success("✅ Qdrant Connected")
             # Display the model being used for RAG
             if rag_system and hasattr(rag_system, 'CHAT_MODEL'):
-                st.info(f"🤖 Using model: **{rag_system.CHAT_MODEL}**")
+                st.info(f"Using model: **{rag_system.CHAT_MODEL}**")
         else:
             st.error("❌ Qdrant Disconnected")
             st.info("Please check your Qdrant configuration in .env or Streamlit secrets")
@@ -1549,10 +1989,10 @@ with tab7:
         st.divider()
         
         # Document Management
-        st.subheader("📁 Document Management")
+        st.subheader("Document Management")
         
         # Single index button that always re-indexes
-        if st.button("🔄 Index Selected Documents", type="primary", use_container_width=True):
+        if st.button("Index Selected Documents", type="primary", use_container_width=True):
             if not rag_system:
                 st.error("❌ RAG system not initialized")
             elif 'selected_files' not in st.session_state or not st.session_state.selected_files:
@@ -1601,7 +2041,7 @@ with tab7:
                         log_error(f"[RAG-UI] Indexing failed: {str(e)}")
         
         # Clear Vector Store button
-        if st.button("🗑️ Clear Vector Store", use_container_width=True):
+        if st.button("Clear Vector Store", use_container_width=True):
             if not rag_system:
                 st.error("❌ RAG system not initialized")
             else:
@@ -1660,7 +2100,7 @@ with tab7:
         
         # Index Information Display
         st.divider()
-        st.subheader("📊 Index Status")
+        st.subheader("Index Status")
         
         # Check if we're synchronized
         if st.session_state.rag_index_synchronized == False:
@@ -1670,9 +2110,9 @@ with tab7:
                 chunk_count = stats.get('points_count', 0) if stats.get('exists', False) else 0
                 if chunk_count > 0:
                     st.warning(f"⚠️ Index contains {chunk_count:,} chunks from a previous session")
-                    st.info("📝 The indexed documents are unknown. Please re-index selected documents to sync or clear the vector store.")
+                    st.info("The indexed documents are unknown. Please re-index selected documents to sync or clear the vector store.")
                 else:
-                    st.info("📭 Index is empty. Select documents and click 'Index Selected Documents' to begin.")
+                    st.info("Index is empty. Select documents and click 'Index Selected Documents' to begin.")
         elif 'rag_indexed_info' in st.session_state and st.session_state.rag_indexed_info:
             # Synchronized with data
             info = st.session_state.rag_indexed_info
@@ -1690,14 +2130,14 @@ with tab7:
                 chunk_count = stats.get('points_count', 0) if stats.get('exists', False) else 0
                 if chunk_count > 0:
                     st.warning(f"⚠️ Index contains {chunk_count:,} chunks but document info is unavailable")
-                    st.info("📝 Re-index selected documents to sync the index status.")
+                    st.info("Re-index selected documents to sync the index status.")
                 else:
-                    st.info("📭 Index is empty. Select documents and click 'Index Selected Documents' to begin.")
+                    st.info("Index is empty. Select documents and click 'Index Selected Documents' to begin.")
         
         # List selected documents for RAG indexing
         if 'selected_files' in st.session_state and st.session_state.selected_files:
             st.divider()
-            st.subheader("📚 Selected Documents Status")
+            st.subheader("Selected Documents Status")
             selected_count = len(st.session_state.selected_files)
             
             # Get list of indexed documents

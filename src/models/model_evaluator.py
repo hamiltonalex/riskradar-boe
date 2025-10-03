@@ -41,13 +41,13 @@ class ModelEvaluator:
     
     def __init__(self):
         self.models = {
-            'gpt-5': {'client': 'openai', 'cost_per_1k': 0.00030},
-            'gpt-5-mini': {'client': 'openai', 'cost_per_1k': 0.00020},
-            'gpt-5-nano': {'client': 'openai', 'cost_per_1k': 0.00015},
-            'gpt-4o': {'client': 'openai', 'cost_per_1k': 0.00025},
-            'gpt-4o-mini': {'client': 'openai', 'cost_per_1k': 0.00015},
-            'o1-mini': {'client': 'openai', 'cost_per_1k': 0.00040},
-            'claude-3-haiku': {'client': 'anthropic', 'cost_per_1k': 0.00025},
+            'gpt-5': {'client': 'openai', 'cost_per_1k': 1.25},  # $1.25 per 1M tokens input
+            'gpt-5-mini': {'client': 'openai', 'cost_per_1k': 0.50},  # Estimated lower cost
+            'claude-opus-4-1-20250805': {'client': 'anthropic', 'cost_per_1k': 15.00},  # $15 per 1M tokens input
+            'claude-sonnet-4-5-20250929': {'client': 'anthropic', 'cost_per_1k': 3.00},  # $3 per 1M tokens input
+            'claude-3-5-haiku-20241022': {'client': 'anthropic', 'cost_per_1k': 0.25},  # $0.25 per 1M tokens input
+            'gemini-2.5-pro': {'client': 'google', 'cost_per_1k': 0.50},  # Estimated
+            'gemini-2.5-flash': {'client': 'google', 'cost_per_1k': 0.15},  # Estimated best price-performance
             # Add more models as needed
         }
         

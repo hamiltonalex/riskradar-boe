@@ -1,23 +1,87 @@
 """
 Risk Signal Synthesizer (Orchestrator) for RiskRadar
-Combines insights from all agents to generate comprehensive risk assessment
+Combines insights from all 16 agents to generate risk assessment
+Implements 2-phase execution: 14 agents in parallel, then 2 sequential
 """
 
 from typing import Dict, List, Optional, Tuple
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 from src.agents.base_agent import BaseAgent
 from src.agents.sentiment_agent import SentimentTrackerAgent
 from src.agents.topic_agent import TopicEvolutionAgent
+from src.agents.confidence_agent import ManagementConfidenceAgent
+from src.agents.analyst_agent import AnalystConcernAgent
+from src.agents.capital_agent import CapitalBuffersAgent
+from src.agents.liquidity_agent import LiquidityFundingAgent
+from src.agents.market_irrbb_agent import MarketIRRBBAgent
+from src.agents.credit_agent import CreditQualityAgent
+from src.agents.earnings_agent import EarningsQualityAgent
+from src.agents.governance_agent import GovernanceControlsAgent
+from src.agents.legal_agent import LegalRegAgent
+from src.agents.business_model_agent import BusinessModelAgent
+from src.agents.off_balance_sheet_agent import OffBalanceSheetAgent
+from src.agents.red_flags_agent import RedFlagsAgent
+from src.agents.discrepancy_agent import DiscrepancyAuditorAgent
+from src.agents.camels_fusion_agent import CAMELSFuserAgent
 import config
 
+# Import logging
+try:
+    from src.utils.debug_logger import log_debug, log_info, log_error, log_warning
+except ImportError:
+    def log_debug(msg): print(f"[DEBUG] {msg}")
+    def log_info(msg): print(f"[INFO] {msg}")
+    def log_error(msg): print(f"[ERROR] {msg}")
+    def log_warning(msg): print(f"[WARNING] {msg}")
+
 class RiskSynthesizer(BaseAgent):
-    """Orchestrator that synthesizes insights from all agents"""
-    
+    """Orchestrator that synthesizes insights from all 16 agents with 2-phase execution"""
+
     def __init__(self, model: str = None):
         super().__init__('risk_synthesizer', model)
         self.risk_history = []
         self.baseline_risk = None
+        self.agent_results = {}  # Store all agent results internally
+        self.results_lock = threading.Lock()  # Thread safety
+
+        # Initialize all 16 agents
+        log_info(f"Initializing all 16 agents with model: {self.model}")
+
+        # Tier 1: Linguistic agents (4)
+        self.agents = {
+            'sentiment': SentimentTrackerAgent(model),
+            'topics': TopicEvolutionAgent(model),
+            'confidence': ManagementConfidenceAgent(model),
+            'analyst_concerns': AnalystConcernAgent(model),
+
+            # Tier 2: Quantitative agents (9)
+            'capital_buffers': CapitalBuffersAgent(model),
+            'liquidity_funding': LiquidityFundingAgent(model),
+            'market_irrbb': MarketIRRBBAgent(model),
+            'credit_quality': CreditQualityAgent(model),
+            'earnings_quality': EarningsQualityAgent(model),
+            'governance_controls': GovernanceControlsAgent(model),
+            'legal_reg': LegalRegAgent(model),
+            'business_model': BusinessModelAgent(model),
+            'off_balance_sheet': OffBalanceSheetAgent(model),
+
+            # Tier 3: Pattern detection (1)
+            'red_flags': RedFlagsAgent(model),
+
+            # Tier 4: Meta-analysis (2) - run sequentially after Phase 1
+            'discrepancy_auditor': DiscrepancyAuditorAgent(model),
+            'camels_fuser': CAMELSFuserAgent(model)
+        }
+
+        log_info(f"Successfully initialized {len(self.agents)} agents")
+
+    def get_agent_results(self) -> Dict:
+        """Get all agent results (for external access)"""
+        return self.agent_results.copy()
     
     def analyze(self, text: str, context: Dict = None) -> Dict:
         """
@@ -26,28 +90,78 @@ class RiskSynthesizer(BaseAgent):
         """
         return self.synthesize_risks(context or {})
     
-    def synthesize_risks(self, agent_results: Dict, mode: str = "Single Document Analysis", 
+    def synthesize_risks(self, analysis_input: Dict, mode: str = "Single Document Analysis",
                         structured_docs: List[Dict] = None) -> Dict:
         """
-        Synthesize risk assessment from multiple agent analyses
-        
+        Synthesize risk assessment using all 16 agents with 2-phase execution
+
         Args:
-            agent_results: Dict containing results from all agents
+            analysis_input: Dict with 'text' key containing document text, or pre-computed agent_results
             mode: Analysis mode (Single Document, Cross-Bank, Timeline)
             structured_docs: List of structured documents with metadata
-            
+
         Returns:
-            Comprehensive risk assessment
+            Comprehensive risk assessment from CAMELS fuser
         """
-        
+
+        # Check if we received pre-computed results or need to run analysis
+        if 'text' in analysis_input:
+            # Run full 16-agent analysis
+            document_text = analysis_input['text']
+            log_info("Running full 16-agent analysis...")
+
+            # Execute all agents in 2 phases
+            self._execute_all_agents(document_text)
+
+            # Use internally stored results
+            agent_results = self.agent_results
+        else:
+            # Use provided results (backward compatibility)
+            agent_results = analysis_input
+
         # Route to appropriate synthesis method based on mode
         if mode == "Cross-Bank Comparison" and structured_docs:
             return self._synthesize_cross_bank(agent_results, structured_docs)
         elif mode == "Timeline Analysis" and structured_docs:
             return self._synthesize_timeline(agent_results, structured_docs)
-        
-        # Default single document analysis
-        # Extract individual agent results
+
+        # Return CAMELS fuser result as final assessment
+        camels_result = agent_results.get('camels_fuser', {})
+        if camels_result and 'parsed_response' in camels_result:
+            # Extract the final assessment from CAMELS fuser
+            final_assessment = camels_result['parsed_response']
+
+            # COMPATIBILITY LAYER: Convert overall_score to legacy format for UI
+            overall_score = final_assessment.get('overall_score', 0.5)
+
+            # Convert 0.0-1.0 scale to 0-10 scale
+            risk_score_10 = overall_score * 10.0
+
+            # Determine risk_level based on thresholds (matching config.RISK_THRESHOLDS)
+            if risk_score_10 < 3.5:
+                risk_level = 'green'
+            elif risk_score_10 < 7.0:
+                risk_level = 'amber'
+            else:
+                risk_level = 'red'
+
+            # Add legacy fields for backward compatibility with UI
+            final_assessment['risk_score'] = risk_score_10
+            final_assessment['risk_level'] = risk_level
+
+            # Add metadata
+            final_assessment['timestamp'] = datetime.now().isoformat()
+            final_assessment['agents_executed'] = len(agent_results)
+
+            log_info(f"CAMELS assessment: {risk_level.upper()} (score: {risk_score_10:.1f}/10, overall_score: {overall_score:.3f})")
+
+            self.last_result = final_assessment
+            return final_assessment
+
+        # FALLBACK: If CAMELS fuser didn't run, use legacy synthesis
+        log_warning("CAMELS fuser not available, using legacy synthesis")
+
+        # Extract individual agent results (legacy mode for backward compatibility)
         sentiment_result = agent_results.get('sentiment', {})
         topic_result = agent_results.get('topics', {})
         confidence_result = agent_results.get('confidence', {})
@@ -116,14 +230,154 @@ class RiskSynthesizer(BaseAgent):
         
         self.last_result = assessment
         return assessment
-    
+
+    def _execute_all_agents(self, document_text: str, max_workers: int = 4):
+        """
+        Execute all 16 agents in 2 phases:
+        Phase 1: 14 independent agents in parallel
+        Phase 2: 2 dependent agents sequentially (discrepancy_auditor, camels_fuser)
+
+        Args:
+            document_text: Full document text to analyze
+            max_workers: Number of concurrent threads for Phase 1
+        """
+        log_info("Starting 2-phase agent execution...")
+
+        # Phase 1: Independent agents (run in parallel)
+        phase1_agents = [
+            'sentiment', 'topics', 'confidence', 'analyst_concerns',  # Tier 1: Linguistic
+            'capital_buffers', 'liquidity_funding', 'market_irrbb',  # Tier 2: Quantitative
+            'credit_quality', 'earnings_quality', 'governance_controls',
+            'legal_reg', 'business_model', 'off_balance_sheet',
+            'red_flags'  # Tier 3: Pattern detection
+        ]
+
+        log_info(f"Phase 1: Executing {len(phase1_agents)} agents in parallel (max_workers={max_workers})...")
+
+        # Execute Phase 1 agents in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all Phase 1 agents
+            future_to_agent = {
+                executor.submit(self._run_single_agent, agent_key, document_text): agent_key
+                for agent_key in phase1_agents
+            }
+
+            # Collect results as they complete
+            completed = 0
+            for future in as_completed(future_to_agent):
+                agent_key = future_to_agent[future]
+                try:
+                    result = future.result()
+                    completed += 1
+                    log_info(f"Phase 1: {agent_key} completed ({completed}/{len(phase1_agents)})")
+                except Exception as e:
+                    log_error(f"Phase 1: {agent_key} failed: {str(e)}")
+
+        log_info(f"Phase 1 complete: {completed}/{len(phase1_agents)} agents succeeded")
+
+        # Phase 2: Dependent agents (run sequentially)
+        log_info("Phase 2: Running dependent agents sequentially...")
+
+        # Run discrepancy_auditor (needs all Phase 1 results)
+        try:
+            log_info("Running discrepancy_auditor...")
+            discrepancy_result = self.agents['discrepancy_auditor'].analyze(self.agent_results)
+            with self.results_lock:
+                self.agent_results['discrepancy_auditor'] = {
+                    'success': True,
+                    'overall_score': discrepancy_result.get('overall_score', 0.0),
+                    'parsed_response': discrepancy_result
+                }
+            log_info("discrepancy_auditor completed")
+        except Exception as e:
+            log_error(f"discrepancy_auditor failed: {str(e)}")
+
+        # Add delay to avoid rate limits
+        time.sleep(2)
+
+        # Run camels_fuser (needs all 15 prior agents)
+        try:
+            log_info("Running camels_fuser...")
+            camels_result = self.agents['camels_fuser'].analyze(self.agent_results)
+            with self.results_lock:
+                self.agent_results['camels_fuser'] = {
+                    'success': True,
+                    'overall_score': camels_result.get('overall_score', 0.0),
+                    'parsed_response': camels_result
+                }
+            log_info("camels_fuser completed")
+        except Exception as e:
+            log_error(f"camels_fuser failed: {str(e)}")
+
+        log_info(f"All agents complete. Total: {len(self.agent_results)}/16 agents succeeded")
+
+    def _run_single_agent(self, agent_key: str, document_text: str) -> Dict:
+        """
+        Run a single agent and store results (thread-safe)
+
+        Args:
+            agent_key: Agent identifier
+            document_text: Document text to analyze
+
+        Returns:
+            Agent result dictionary
+        """
+        try:
+            start_time = time.time()
+            agent = self.agents[agent_key]
+
+            # Call the agent's analyze method
+            result = agent.analyze(document_text)
+
+            duration = time.time() - start_time
+
+            # Store result with thread safety
+            with self.results_lock:
+                self.agent_results[agent_key] = {
+                    'success': True,
+                    'overall_score': result.get('overall_score', 0.0),
+                    'parsed_response': result,
+                    'duration_seconds': duration
+                }
+
+            return result
+        except Exception as e:
+            log_error(f"Agent {agent_key} failed: {str(e)}")
+            # Store error result
+            with self.results_lock:
+                self.agent_results[agent_key] = {
+                    'success': False,
+                    'error': str(e),
+                    'overall_score': 0.0
+                }
+            raise
+
     def _calculate_sentiment_risk(self, sentiment_result: Dict) -> float:
         """Calculate risk score from sentiment analysis"""
         if not sentiment_result:
             return 5.0  # Default medium risk
-        
+
+        # Use overall_score if available (0-1 scale from LLM)
+        if 'overall_score' in sentiment_result:
+            overall_score = sentiment_result.get('overall_score', 0.5)
+            # Scale 0.0-1.0 to 0.0-10.0 (higher score = higher risk)
+            risk_score = overall_score * 10.0
+            try:
+                from src.utils.debug_logger import log_debug
+                log_debug(f"Sentiment: Using agent-provided overall_score: {risk_score:.2f}/10")
+            except:
+                pass
+            return min(10.0, max(0.0, risk_score))
+
+        # FALLBACK: Existing manual calculation for backward compatibility
+        try:
+            from src.utils.debug_logger import log_debug
+            log_debug("Sentiment: Using manual risk calculation (legacy mode)")
+        except:
+            pass
+
         risk_score = 5.0  # Base score
-        
+
         # Adjust based on sentiment score
         sentiment_score = sentiment_result.get('sentiment_score', 0)
         if sentiment_score < -0.3:
@@ -132,114 +386,163 @@ class RiskSynthesizer(BaseAgent):
             risk_score += 1.0
         elif sentiment_score > 0.5:
             risk_score -= 1.0
-        
+
         # Adjust based on sentiment delta
         sentiment_delta = sentiment_result.get('sentiment_delta', 0)
         if sentiment_delta < -0.3:
             risk_score += 1.5
-        
+
         # Adjust based on tone indicators
         tone_indicators = sentiment_result.get('tone_indicators', [])
         if 'defensive' in tone_indicators:
             risk_score += 1.0
         if 'evasive' in tone_indicators:
             risk_score += 1.5
-        
+
         # Adjust based on guidance confidence
         guidance_conf = sentiment_result.get('guidance_confidence', 'medium')
         if guidance_conf == 'low':
             risk_score += 1.0
         elif guidance_conf == 'high':
             risk_score -= 0.5
-        
+
         return min(10.0, max(0.0, risk_score))
     
     def _calculate_topic_risk(self, topic_result: Dict) -> float:
         """Calculate risk score from topic analysis"""
         if not topic_result:
             return 5.0
-        
+
+        # Use overall_score if available (0-1 scale from LLM)
+        if 'overall_score' in topic_result:
+            overall_score = topic_result.get('overall_score', 0.5)
+            # Scale 0.0-1.0 to 0.0-10.0 (higher score = higher risk)
+            risk_score = overall_score * 10.0
+            try:
+                from src.utils.debug_logger import log_debug
+                log_debug(f"Topic: Using agent-provided overall_score: {risk_score:.2f}/10")
+            except:
+                pass
+            return min(10.0, max(0.0, risk_score))
+
         risk_score = 3.0  # Base score
-        
+
         # Check detected risk topics
         risk_topics = topic_result.get('detected_risk_topics', [])
         risk_score += min(len(risk_topics) * 0.5, 3.0)  # Cap at +3
-        
+
         # High frequency risk topics
         for topic in risk_topics:
             if topic.get('frequency', 0) > 10:
                 risk_score += 0.5
-        
-        # New risk topics
+
+        # Risk topics
         new_topics = topic_result.get('new_topics', [])
         risk_related_new = [
-            t for t in new_topics 
+            t for t in new_topics
             if any(risk in t.lower() for risk in ['risk', 'loss', 'exposure', 'concern'])
         ]
         risk_score += len(risk_related_new) * 0.5
-        
+
         # Topic turnover (instability)
         topic_changes = topic_result.get('topic_changes', {})
         if topic_changes.get('topic_turnover', 0) > 5:
             risk_score += 1.0
-        
+
         return min(10.0, max(0.0, risk_score))
     
     def _calculate_confidence_risk(self, confidence_result: Dict) -> float:
         """Calculate risk score from management confidence analysis"""
         if not confidence_result:
             return 5.0
-        
-        risk_score = 5.0
-        
-        # Confidence score
-        confidence_score = confidence_result.get('confidence_score', 0.5)
-        risk_score += (0.5 - confidence_score) * 4  # Lower confidence = higher risk
-        
-        # Hedging frequency
-        hedging = confidence_result.get('hedging_frequency', 'medium')
-        if hedging == 'high':
-            risk_score += 1.5
-        elif hedging == 'low':
-            risk_score -= 0.5
-        
-        # Confidence trend
+
+        # Use overall_score if available (0-1 scale from LLM)
+        if 'overall_score' in confidence_result:
+            overall_score = confidence_result.get('overall_score', 0.5)
+            # Scale 0.0-1.0 to 0.0-10.0 (higher score = higher risk)
+            risk_score = overall_score * 10.0
+            try:
+                from src.utils.debug_logger import log_debug
+                log_debug(f"Confidence: Using agent-provided overall_score: {risk_score:.2f}/10")
+            except:
+                pass
+            return min(10.0, max(0.0, risk_score))
+
+        # FALLBACK: Existing manual calculation for backward compatibility
+        try:
+            from src.utils.debug_logger import log_debug
+            log_debug("Confidence: Using manual risk calculation (legacy mode)")
+        except:
+            pass
+
+        # Get confidence score - handle both field names for compatibility
+        # Prefer overall_confidence_score (0-10 scale) over confidence_score (0-1 scale)
+        confidence_score = confidence_result.get('overall_confidence_score')
+        if confidence_score is None:
+            # Fall back to old field name and scale up
+            old_score = confidence_result.get('confidence_score', 0.5)
+            confidence_score = old_score * 10  # Convert 0-1 to 0-10 scale
+
+        # Calculate risk score (10 - confidence gives us the risk)
+        risk_score = 10 - confidence_score  # Direct inversion: high confidence = low risk
+
+        # Adjust for hedging frequency
+        hedging = confidence_result.get('hedging_analysis', {}).get('hedging_level',
+                                      confidence_result.get('hedging_frequency', 'medium'))
+        if hedging in ['high', 'significant', 'excessive']:
+            risk_score = min(10.0, risk_score + 1.5)
+        elif hedging in ['low', 'minimal']:
+            risk_score = max(0.0, risk_score - 0.5)
+
+        # Adjust for confidence trend
         trend = confidence_result.get('confidence_trend', 'stable')
-        if trend == 'decreasing':
-            risk_score += 1.0
-        elif trend == 'increasing':
-            risk_score -= 0.5
-        
+        if trend in ['decreasing', 'deteriorating']:
+            risk_score = min(10.0, risk_score + 1.0)
+        elif trend in ['increasing', 'improving']:
+            risk_score = max(0.0, risk_score - 0.5)
+
         return min(10.0, max(0.0, risk_score))
     
     def _calculate_analyst_risk(self, analyst_result: Dict) -> float:
         """Calculate risk score from analyst concerns"""
         if not analyst_result:
             return 5.0
-        
+
+        # Use overall_score if available (0-1 scale from LLM)
+        if 'overall_score' in analyst_result:
+            overall_score = analyst_result.get('overall_score', 0.5)
+            # Scale 0.0-1.0 to 0.0-10.0 (higher score = higher risk)
+            risk_score = overall_score * 10.0
+            try:
+                from src.utils.debug_logger import log_debug
+                log_debug(f"Analyst: Using agent-provided overall_score: {risk_score:.2f}/10")
+            except:
+                pass
+            return min(10.0, max(0.0, risk_score))
+
         risk_score = 3.0
-        
+
         # Questioning tone
         tone = analyst_result.get('questioning_tone', 'normal')
         if tone == 'aggressive':
             risk_score += 2.0
         elif tone == 'skeptical':
             risk_score += 1.0
-        
+
         # Number of concerns
         top_concerns = analyst_result.get('top_concerns', [])
         risk_score += min(len(top_concerns) * 0.5, 2.0)
-        
+
         # Follow-up intensity
         follow_up = analyst_result.get('follow_up_intensity', 'medium')
         if follow_up == 'high':
             risk_score += 1.0
-        
+
         # Satisfaction level
         satisfaction = analyst_result.get('satisfaction_level', 'neutral')
         if satisfaction == 'unsatisfied':
             risk_score += 1.5
-        
+
         return min(10.0, max(0.0, risk_score))
     
     def _determine_risk_level(self, risk_score: float) -> str:
@@ -258,11 +561,22 @@ class RiskSynthesizer(BaseAgent):
         sentiment = agent_results.get('sentiment', {})
         if sentiment.get('alerts'):
             for alert in sentiment['alerts']:
+                # Handle both old (string array) and new (object array) key_phrases format
+                phrases = sentiment.get('key_phrases', [])
+                evidence = []
+                for p in phrases[:2]:
+                    if isinstance(p, dict):
+                        # Format: object with 'phrase' field
+                        evidence.append(p.get('phrase', ''))
+                    else:
+                        # Old format: string
+                        evidence.append(str(p))
+
                 signals.append({
                     'signal': alert,
                     'severity': risk_components['sentiment'][0],
                     'source': 'sentiment_analysis',
-                    'evidence': sentiment.get('key_phrases', [])[:2]
+                    'evidence': evidence
                 })
         
         topics = agent_results.get('topics', {})

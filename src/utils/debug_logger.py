@@ -190,6 +190,99 @@ class StreamlitLogger:
         context = {'execution_time_ms': int(execution_time*1000)}
         self.log(level, f"Agent {'Completed' if success else 'Failed'}: {agent_name}", context)
     
+    def log_agent_response(self, agent_name: str, model: str, prompt: str, response: str, execution_time: float):
+        """
+        Log agent LLM response with truncated console output and full disk save
+        
+        Args:
+            agent_name: Name of the agent (e.g., 'sentiment_tracker')
+            model: LLM model used
+            prompt: The prompt sent to the LLM
+            response: The full response from the LLM
+            execution_time: Time taken for the LLM call
+        """
+        try:
+            # Import config values
+            import config
+            
+            # Check if agent response logging is enabled
+            if not getattr(config, 'DEBUG_LOG_AGENT_RESPONSES', True):
+                return
+            
+            # Create subdirectory for agent responses
+            agent_logs_subdir = getattr(config, 'DEBUG_AGENT_LOGS_SUBDIR', 'agent_responses')
+            agent_logs_dir = self.log_dir / agent_logs_subdir
+            agent_logs_dir.mkdir(exist_ok=True)
+            
+            # Generate filename with human-readable timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]  # Include milliseconds
+            filename = f"{agent_name}_{timestamp}.json"
+            filepath = agent_logs_dir / filename
+            
+            # Get preview lengths from config
+            prompt_preview_length = getattr(config, 'DEBUG_PROMPT_PREVIEW_LENGTH', 1000)
+            response_preview_length = getattr(config, 'DEBUG_RESPONSE_PREVIEW_LENGTH', 500)
+            
+            # Try to parse the response as JSON for pretty printing
+            parsed_response = response
+            try:
+                # First, clean the response string, removing any surrounding text/tags
+                clean_response = response.strip()
+                if '<json_response>' in clean_response and '</json_response>' in clean_response:
+                    start_tag = '<json_response>'
+                    end_tag = '</json_response>'
+                    start_idx = clean_response.find(start_tag) + len(start_tag)
+                    end_idx = clean_response.find(end_tag)
+                    clean_response = clean_response[start_idx:end_idx].strip()
+                
+                if clean_response.startswith('```json'):
+                    clean_response = clean_response[7:]
+                if clean_response.endswith('```'):
+                    clean_response = clean_response[:-3]
+
+                # Attempt to load the cleaned JSON string into a Python dict
+                parsed_response = json.loads(clean_response)
+            except (json.JSONDecodeError, TypeError):
+                # If it fails, it's not a valid JSON string, so keep the original raw response
+                parsed_response = response
+
+            # Prepare response data
+            response_data = {
+                'agent': agent_name,
+                'model': model,
+                'timestamp': datetime.now().isoformat(),
+                'execution_time_ms': int(execution_time * 1000),
+                'prompt_length': len(prompt),
+                'response_length': len(response),
+                'prompt': prompt.split('\n'),
+                'full_response': parsed_response
+            }
+            
+            # Save full response to disk
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(response_data, f, indent=2, ensure_ascii=False)
+            
+            # Log truncated preview to console
+            preview = response[:response_preview_length] + '...' if len(response) > response_preview_length else response
+            
+            # Remove newlines from preview for cleaner console output
+            preview = preview.replace('\n', ' ').replace('\r', '')
+            
+            # Log summary to console
+            self.info(
+                f"Agent Response: {agent_name}",
+                model=model,
+                response_size=len(response),
+                saved_to=filename
+            )
+            
+            # Log preview at debug level
+            self.debug(f"Response preview for {agent_name}: {preview}")
+            
+        except Exception as e:
+            # Log error but don't fail the main process
+            self.error(f"Failed to log agent response: {e}")
+    
     def clear_logs(self):
         """Clear logs from session state"""
         with self.log_lock:

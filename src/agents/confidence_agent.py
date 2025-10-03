@@ -11,9 +11,9 @@ import config
 
 class ManagementConfidenceAgent(BaseAgent):
     """Agent for analyzing management confidence and hedging language"""
-    
+
     def __init__(self, model: str = None):
-        super().__init__('management_confidence', model)
+        super().__init__('confidence_evaluator', model)
         
         # Hedging and uncertainty indicators
         self.hedging_words = {
@@ -159,18 +159,18 @@ class ManagementConfidenceAgent(BaseAgent):
         3. Commitment level in forward guidance
         4. Tone when discussing challenges
         5. Clarity vs vagueness in responses
-        
+
         Provide a JSON response with:
-        - confidence_score: 0-10 scale (10 = very confident)
+        - overall_confidence_score: 0-10 scale (10 = very confident)
         - hedging_examples: List of specific hedging phrases found
         - confident_statements: List of confident statements
         - guidance_clarity: Score 0-10 for guidance clarity
         - evasiveness_detected: Boolean
         - key_concerns: List of concerns expressed with uncertainty
-        
+
         Text to analyze:
         {text}
-        
+
         Response (JSON only):
         """
     
@@ -178,11 +178,11 @@ class ManagementConfidenceAgent(BaseAgent):
         """Combine rule-based and LLM analysis results"""
         if not llm:
             llm = {}
-        
+
         return {
             'hedging_analysis': hedging,
             'confidence_analysis': confidence,
-            'llm_confidence_score': llm.get('confidence_score', 5),
+            'llm_confidence_score': llm.get('overall_confidence_score', llm.get('confidence_score', 5)),
             'hedging_examples': llm.get('hedging_examples', []),
             'confident_statements': llm.get('confident_statements', []),
             'guidance_clarity': llm.get('guidance_clarity', 5),
