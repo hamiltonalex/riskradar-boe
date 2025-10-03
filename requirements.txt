@@ -4,22 +4,21 @@ pandas==2.2.0
 numpy==1.26.3
 python-dotenv==1.0.0
 
-# LLM & AI
-openai==1.102.0
+# LLM & AI - Fixed version conflicts
+openai==1.104.2
 anthropic==0.64.0
 google-generativeai==0.3.2
 protobuf>=3.20,<5
-langchain>=0.2
-langchain-openai>=0.3
-langchain-anthropic>=0.1.15
-langchain-google-genai>=1.0.0
-langchain-community>=0.2
-langchain-qdrant>=0.1
-langchain-core>=0.2
-tiktoken==0.5.2
-transformers==4.37.2
+langchain==0.2.16
+langchain-openai==0.3.0
+langchain-anthropic==0.1.15
+langchain-google-genai==1.0.0
+langchain-community==0.2.0
+langchain-qdrant==0.1.0
+langchain-core==0.2.38
+tiktoken==0.7.0
 
-# RAG & Vector Database (Arkadiusz's module)
+# RAG & Vector Database
 qdrant-client>=1.7
 pypdf>=4.0.0
 
@@ -39,19 +38,12 @@ textblob==0.17.1
 
 # NLP & Text Processing
 nltk==3.8.1
-spacy==3.7.2
 scikit-learn==1.4.0
-
-# Testing & Development
-pytest==8.0.0
-pytest-cov==4.1.0
-black==24.1.1
-flake8==7.0.0
-ipykernel==6.29.0
-jupyter==1.0.0
 
 # Utilities
 tqdm==4.66.1
 colorama==0.4.6
 python-dateutil==2.8.2
 pytz==2024.1
+setuptools>=65.0.0
+wheel>=0.37.0
